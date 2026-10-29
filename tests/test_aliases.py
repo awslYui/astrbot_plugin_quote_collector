@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from test_integration import Bot, Event, forward, plugin_module, text
 from test_web_api import Config, Context, Request
 from astrbot_plugin_quote_collector.core import UserError, parse_alias_groups
+from astrbot_plugin_quote_collector.catalog import parse_catalog
 from astrbot_plugin_quote_collector.forwarding import Extraction
 from astrbot_plugin_quote_collector.replica import plan_replica
 from astrbot_plugin_quote_collector.store import Quote, QuoteConflict, QuoteStore
@@ -175,8 +176,8 @@ class AliasWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch("添加 示例昵称#第二条")
         for name in ALIASES:
             await self.dispatch("查 " + name)
-            self.assertEqual([node["data"]["content"][0]["data"]["text"] for node in self.bot.calls[-1][1]["messages"]],
-                             ["第一条", "第二条"])
+            contents = [Quote(node["data"]["content"][0]["data"]["text"]) for node in self.bot.calls[-1][1]["messages"]]
+            self.assertEqual([quote.body for quote in parse_catalog(contents).groups["示例人物"]], ["第一条", "第二条"])
         denied = await self.dispatch("删除 示例昵称#第一条")
         self.assertIn("只有", denied.sent[-1])
         deleted = await self.dispatch("删除 示例昵称#第一条", role="admin")
@@ -232,7 +233,8 @@ class AliasWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["data"]["alias_merge"], {"moved": 1, "duplicates": 0})
         self.assertEqual(json.loads(self.plugin.config.path.read_text())["keyword_aliases"], ["示例人物#demo#示例昵称#未关联别名"])
         await self.dispatch("查 示例昵称")
-        self.assertEqual(self.bot.calls[-1][1]["messages"][0]["data"]["content"][0]["data"]["text"], "之前的内容")
+        content = self.bot.calls[-1][1]["messages"][0]["data"]["content"][0]["data"]["text"]
+        self.assertEqual(parse_catalog([Quote(content)]).groups["示例人物"][0].body, "之前的内容")
 
     async def test_invalid_alias_setting_does_not_merge_or_change_live_configuration(self):
         await self.dispatch("添加 未关联别名#原文")

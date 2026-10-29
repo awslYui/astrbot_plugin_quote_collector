@@ -127,6 +127,7 @@ class ForwardReader:
         self._seen: set[tuple[str, str]] = set()
         self._api_calls = 0
         self._visited_nodes = 0
+        self._ordinary_quotes = 0
 
     async def api(self, action: str, **params) -> Any:
         self._api_calls += 1
@@ -183,8 +184,14 @@ class ForwardReader:
             if body and not any(pattern.search(body) for pattern in self.ignore_patterns):
                 if len(body) > 30000:
                     raise UserError("有语录超过 30000 字，本次未写入。请拆分后添加。")
-                if len(self.report.quotes) >= self.limit:
+                # A compact export can use multiple continuation nodes for
+                # one quote. The catalog parser validates actual item counts.
+                from .exporting import FRAGMENT
+                fragment = FRAGMENT.fullmatch(body)
+                if not fragment and self._ordinary_quotes >= self.limit:
                     raise UserError(f"单次导入超过 {self.limit} 条，本次未写入。请分批引用导入，或调高导入上限。")
+                if not fragment:
+                    self._ordinary_quotes += 1
                 self.report.quotes.append(Quote(body, author_id, author_name, source_id))
             elif not has_forward:
                 self.report.skipped += 1

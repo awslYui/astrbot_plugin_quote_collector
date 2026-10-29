@@ -8,7 +8,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     destination = root.parent / f"{root.name}.zip"
     root_files = {
-        "__init__.py", "main.py", "core.py", "forwarding.py", "store.py", "web_api.py", "replica.py", "catalog.py",
+        "__init__.py", "main.py", "core.py", "forwarding.py", "store.py", "web_api.py", "replica.py", "catalog.py", "exporting.py",
         "metadata.yaml", "_conf_schema.json", "README.md", "LICENSE", ".gitignore",
     }
     sources = [root / name for name in sorted(root_files)]

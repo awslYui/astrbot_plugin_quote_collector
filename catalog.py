@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import re
+import json
 from dataclasses import dataclass, field, replace
 
 from .core import UserError, check_keyword, clean_text
 from .store import Quote
+from .exporting import restore_fragments
 
-FIELD = re.compile(r"(主库|触发词|全部文本)\s*[:：]\s*(.*)")
+FIELD = re.compile(r"(主库|触发词|全部文本|本页文本)\s*[:：]\s*(.*)")
 NUMBER = re.compile(r"\s*([0-9]+)[.．、)]\s*(.*)")
 WRAPPERS = {"‘": "’", "“": "”", "'": "'", '"': '"', "「": "」", "『": "』"}
 
@@ -26,6 +28,7 @@ class _Block:
     library: str = ""
     trigger: str | None = None
     total: int | None = None
+    shown: int | None = None
     items: list[Quote] = field(default_factory=list)
 
 
@@ -34,6 +37,7 @@ class _Item:
     owner: Quote
     lines: list[str]
     owners: set[int]
+    json_encoded: bool = False
 
     def text(self) -> str:
         return clean_text("\n".join(self.lines))
@@ -55,9 +59,12 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
     A catalog can occupy one QQ node or multiple adjacent nodes. Line ownership
     is retained so each extracted item keeps its original message provenance.
     """
+    quotes, own_exports = restore_fragments(quotes)
     lines = [(line, quote, index) for index, quote in enumerate(quotes) for line in quote.body.split("\n")]
     fields = {match.group(1) for line, _, _ in lines if (match := FIELD.fullmatch(line.strip()))}
     if len(fields) < 2:
+        if own_exports:
+            raise UserError("语录库片段中缺少主库或文本条数，本次未写入。")
         return None
 
     blocks: list[_Block] = []
@@ -71,7 +78,15 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
         if item is None:
             return
         body = item.text()
-        if item.closing():
+        if item.json_encoded:
+            try:
+                body = json.loads(body)
+            except (TypeError, ValueError) as exc:
+                raise UserError("语录库中的文本编码无效，本次未写入。") from exc
+            if not isinstance(body, str):
+                raise UserError("语录库中的文本编码无效，本次未写入。")
+            body = clean_text(body)
+        elif item.closing():
             if not item.closed():
                 raise UserError("原语录的外围引号未闭合，本次未写入。请引用完整的原记录。")
             body = clean_text(body[1:-1])
@@ -91,8 +106,11 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
             return
         if not block.library or block.total is None:
             raise UserError("原记录缺少作为关键词的“主库”或“全部文本”信息，本次未写入。请引用完整原记录。")
-        if len(block.items) != block.total:
-            raise UserError(f"原记录标注 {block.total} 条文本，实际读到 {len(block.items)} 条，本次未写入。请引用完整原记录。")
+        expected = block.shown if block.shown is not None else block.total
+        if expected > limit:
+            raise UserError(f"原记录标注 {expected} 条，超过单次导入上限 {limit} 条，本次未写入。")
+        if expected > block.total or len(block.items) != expected:
+            raise UserError(f"原记录标注本次 {expected} 条文本，实际读到 {len(block.items)} 条，本次未写入。请引用完整原记录。")
         blocks.append(block)
         block = None
 
@@ -120,8 +138,8 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
             if item is not None or (block is not None and block.items):
                 finish_item()
                 previous_library = block.library if block else ""
-                if name == "全部文本":
-                    raise UserError("“全部文本”出现在编号列表之后，本次未写入。请确认原记录格式完整。")
+                if name in {"全部文本", "本页文本"}:
+                    raise UserError(f"“{name}”出现在编号列表之后，本次未写入。请确认原记录格式完整。")
                 finish_block()
                 block = _Block(library=previous_library if name == "触发词" else "")
             if block is None:
@@ -139,15 +157,19 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
                     raise UserError("原记录出现不一致的触发词，本次未写入。")
                 block.trigger = trigger
             else:
-                total = re.fullmatch(r"([0-9]{1,6})\s*条", value.strip())
+                total = re.fullmatch(r"([0-9]{1,12})\s*条", value.strip())
                 if total is None:
                     raise UserError("“全部文本”须为“数字 条”，本次未写入。")
                 count = int(total.group(1))
-                if count > limit:
+                if name == "本页文本" and count > limit:
                     raise UserError(f"原记录标注 {count} 条，超过单次导入上限 {limit} 条，本次未写入。")
-                if block.total is not None and block.total != count:
+                previous = block.total if name == "全部文本" else block.shown
+                if previous is not None and previous != count:
                     raise UserError("原记录的文本条数标注不一致，本次未写入。")
-                block.total = count
+                if name == "全部文本":
+                    block.total = count
+                else:
+                    block.shown = count
             continue
         numbered = NUMBER.fullmatch(line)
         if numbered:
@@ -156,7 +178,8 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
                 raise UserError("编号列表前缺少作为关键词的主库或文本条数，本次未写入。")
             if len(numbered.group(1)) > 6 or int(numbered.group(1)) != len(block.items) + 1:
                 raise UserError("原记录编号缺失、重复或不连续，本次未写入。请引用完整原记录。")
-            item = _Item(owner, [numbered.group(2)], {owner_index})
+            item = _Item(owner, [numbered.group(2)], {owner_index},
+                         owner_index in own_exports and numbered.group(2).startswith('"'))
         elif item is not None and not item.closing():
             item.lines.append(line)
             item.owners.add(owner_index)

@@ -185,21 +185,23 @@ class CatalogWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["source_triggers"] == ["来点占位符"] for row in rows))
         self.assertEqual({row["keyword"] for row in rows}, {"占位符"})
 
-    async def test_qq_query_returns_five_clean_nodes(self):
+    async def test_qq_query_returns_one_catalog_node_with_five_original_quotes(self):
         await self.quote_command("复刻")
         await self.dispatch("查 占位符")
         action, params = self.bot.calls[-1]
         self.assertEqual(action, "send_group_forward_msg")
-        self.assertEqual([node["data"]["content"][0]["data"]["text"] for node in params["messages"]], EXPECTED)
-        self.assertTrue(all(node["data"]["nickname"].startswith("占位符 · #") for node in params["messages"]))
+        self.assertEqual(len(params["messages"]), 1)
+        content = params["messages"][0]["data"]["content"][0]["data"]["text"]
+        self.assertIn("主库：占位符\n触发词：来点占位符\n全部文本：5 条", content)
+        self.assertEqual([quote.body for quote in parse_catalog([Quote(content)]).groups["占位符"]], EXPECTED)
 
     async def test_querying_original_trigger_returns_the_same_main_entry(self):
         await self.quote_command("复刻")
         await self.dispatch("查 来点占位符")
         action, params = self.bot.calls[-1]
         self.assertEqual(action, "send_group_forward_msg")
-        self.assertEqual([node["data"]["content"][0]["data"]["text"] for node in params["messages"]], EXPECTED)
-        self.assertTrue(all(node["data"]["nickname"].startswith("占位符 · #") for node in params["messages"]))
+        contents = [Quote(node["data"]["content"][0]["data"]["text"]) for node in params["messages"]]
+        self.assertEqual([quote.body for quote in parse_catalog(contents).groups["占位符"]], EXPECTED)
 
     async def test_arbitrary_person_id_collects_different_triggers_into_one_main_entry(self):
         first = catalog("1. ‘原文’", library="123456789", trigger="口令甲")

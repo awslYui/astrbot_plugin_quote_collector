@@ -51,6 +51,8 @@ def load_plugin_with_test_api():
 
 
 plugin_module = load_plugin_with_test_api()
+from astrbot_plugin_quote_collector.catalog import parse_catalog
+from astrbot_plugin_quote_collector.store import Quote
 
 
 def text(value):
@@ -127,7 +129,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.dispatch(plugin, "查 嘉然")
         action, params = self.bot.calls[-1]
         self.assertEqual(action, "send_group_forward_msg")
-        self.assertEqual(params["messages"][0]["data"]["content"][0]["data"]["text"], "今天好开心\n第二行")
+        content = params["messages"][0]["data"]["content"][0]["data"]["text"]
+        self.assertEqual(parse_catalog([Quote(content)]).groups["嘉然"][0].body, "今天好开心\n第二行")
         self.assertFalse(result.llm)
         denied = await self.dispatch(plugin, "删除 嘉然#今天好开心\n第二行")
         self.assertIn("只有", denied.sent[-1])
@@ -215,7 +218,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch(plugin, "添加 a#[CQ:at,qq=all]")
         self.bot.fail_send = True
         result = await self.dispatch(plugin, "查 a")
-        self.assertEqual(result.sent[-1], "[CQ:at,qq=all]")
+        self.assertIn("1. ‘[CQ:at,qq=all]’", result.sent[-1])
 
     async def test_quoted_author_role_cannot_grant_delete_permission(self):
         plugin = self.plugin()

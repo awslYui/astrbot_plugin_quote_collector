@@ -23,7 +23,7 @@ from .store import Quote, QuoteStore
 HELP = """语录插件（指令前可加 /）
 来点关键词：查询该人物的语录，例如 来点示例人物
 来点关键词#2：查看第 2 页
-查 关键词：以合并聊天记录输出语录
+查 关键词：以编号列表汇总展示语录库，长内容自动分块
 查 关键词#2：查看第 2 页
 添加 关键词#语录：添加一条语录
 引用消息后发送 添加 关键词：收录引用的内容
@@ -309,21 +309,31 @@ class QuoteCollectorPlugin(Star):
         if not self.config.get("answer_queries", True):
             return
         natural = command.action == "来点"
-        triggers = (command.trigger, "来点 " + command.trigger[2:]) if natural else ()
-        quotes, total = await asyncio.to_thread(self.store.search, self._scope(event), command.keyword,
-                                                command.page, self.page_size, exact_only=natural, triggers=triggers)
+        if natural:
+            triggers = (command.trigger, "来点 " + command.trigger[2:])
+            quotes, total = await asyncio.to_thread(self.store.search, self._scope(event), command.keyword,
+                                                    command.page, self.page_size, exact_only=True, triggers=triggers)
+            pages = math.ceil(total / self.page_size)
+            shown = len(quotes)
+        else:
+            catalog = await asyncio.to_thread(self.store.catalog_page, self._scope(event), command.keyword, command.page)
+            total, pages, shown = catalog.total, catalog.pages, catalog.shown
         if not total:
             if not waiting:
                 await self._say(event, f"还没有【{command.keyword}】的语录。可用 添加 {command.keyword}#语录，或引用聊天记录后发送 偷 {command.keyword}。")
             return
-        pages = math.ceil(total / self.page_size)
         query_text = command.trigger if natural else f"查 {command.keyword}"
         if command.page > pages:
             raise UserError(f"【{command.keyword}】共 {pages} 页，请使用 {query_text}#1 至 #{pages}。")
+        if natural:
+            contents = [(f"{quote.keyword} · #{quote.id}", quote.body) for quote in quotes]
+        else:
+            contents = [(f"语录库 · {index}/{len(catalog.fragments)}", fragment)
+                        for index, fragment in enumerate(catalog.fragments, 1)]
         nodes = [{"type": "node", "data": {
-            "user_id": str(event.get_self_id()), "nickname": f"{quote.keyword} · #{quote.id}",
-            "content": [{"type": "text", "data": {"text": quote.body}}],
-        }} for quote in quotes]
+            "user_id": str(event.get_self_id()), "nickname": nickname,
+            "content": [{"type": "text", "data": {"text": body}}],
+        }} for nickname, body in contents]
         is_group = bool(event.get_group_id())
         action = "send_group_forward_msg" if is_group else "send_private_forward_msg"
         target = {"group_id": int(event.get_group_id())} if is_group else {"user_id": int(event.get_sender_id())}
@@ -331,12 +341,13 @@ class QuoteCollectorPlugin(Star):
             await self._api(event, action, messages=nodes, **target)
         except Exception:
             logger.warning("[语录收录] 合并转发发送失败，改为文本输出。")
-            text = "\n\n".join(quote.body for quote in quotes)
+            text = "\n\n".join(body for _, body in contents)
             for start in range(0, len(text), 3500):
                 await self._say(event, text[start:start + 3500])
         if pages > 1:
             following = f"下一页：{query_text}#{command.page + 1}" if command.page < pages else "已到最后一页。"
-            await self._say(event, f"【{command.keyword}】共 {total} 条，第 {command.page}/{pages} 页。{following}")
+            detail = f"本页展示 {shown} 条。" if not natural else ""
+            await self._say(event, f"【{command.keyword}】共 {total} 条，第 {command.page}/{pages} 页。{detail}{following}")
 
     async def _collect(self, event: AstrMessageEvent) -> None:
         message = self._message(event)

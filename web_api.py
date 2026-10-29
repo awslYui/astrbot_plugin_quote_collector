@@ -11,7 +11,7 @@ from functools import wraps
 from pathlib import Path
 
 from .core import UserError, check_keyword, clean_text, parse_alias_groups
-from .store import QuoteConflict, QuoteNotFound
+from .store import MAX_WEB_LIBRARIES, MAX_WEB_SELECTION, QuoteConflict, QuoteNotFound
 
 PLUGIN_NAME = "astrbot_plugin_quote_collector"
 SCHEMA = json.loads(Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8"))
@@ -90,6 +90,7 @@ class QuoteWebApi:
         self.routes = {
             "state": (self.state, "GET"), "quotes": (self.quotes, "GET"),
             "save": (self.save, "POST"), "delete": (self.delete, "POST"),
+            "delete_many": (self.delete_many, "POST"),
             "settings": (self.settings, "POST"),
         }
 
@@ -123,6 +124,7 @@ class QuoteWebApi:
             item.update(scope_details(item["scope"]))
         result["settings"] = self.current_settings()
         result["can_save_settings"] = callable(getattr(self.plugin.config, "save_config", None))
+        result["limits"] = {"filter_libraries": MAX_WEB_LIBRARIES, "selection": MAX_WEB_SELECTION}
         return result
 
     @endpoint
@@ -138,7 +140,22 @@ class QuoteWebApi:
         scope, keyword, text = (str(query.get(key, "") or "") for key in ("scope", "keyword", "query"))
         if len(scope) > 500 or len(keyword) > 100 or len(text) > 200:
             raise UserError("筛选条件过长。")
-        result = await asyncio.to_thread(self.plugin.store.web_list, scope=scope, keyword=keyword,
+        encoded = query.get("keywords", "")
+        names = []
+        if encoded:
+            if not isinstance(encoded, str) or len(encoded) > 64000:
+                raise UserError("库名筛选格式无效。")
+            try:
+                names = json.loads(encoded)
+            except (ValueError, TypeError) as exc:
+                raise UserError("库名筛选须为 JSON 文本数组。") from exc
+            if (not isinstance(names, list) or len(names) > MAX_WEB_LIBRARIES
+                    or any(not isinstance(name, str) for name in names)):
+                raise UserError(f"一次最多筛选 {MAX_WEB_LIBRARIES} 个库，库名须为文本。")
+            names = list(dict.fromkeys(check_keyword(name) for name in names))
+            if keyword and names:
+                raise UserError("请勿同时使用单库与多库筛选条件。")
+        result = await asyncio.to_thread(self.plugin.store.web_list, scope=scope, keyword=keyword, keywords=tuple(names),
                                          query=text.strip(), page=page, page_size=page_size)
         for item in result["items"]:
             item.update(scope_details(item["scope"]))
@@ -183,6 +200,18 @@ class QuoteWebApi:
         payload = await self.payload()
         await asyncio.to_thread(self.plugin.store.web_delete, self._id(payload), self._version(payload))
         return {"deleted": True}
+
+    @endpoint
+    async def delete_many(self) -> dict:
+        payload = await self.payload()
+        values = payload.get("items")
+        if not isinstance(values, list) or not 1 <= len(values) <= MAX_WEB_SELECTION:
+            raise UserError(f"请选择 1～{MAX_WEB_SELECTION} 条语录。")
+        if any(not isinstance(item, dict) for item in values):
+            raise UserError("所选语录格式无效，请刷新后重新选择。")
+        items = [(self._id(item), self._version(item)) for item in values]
+        deleted = await asyncio.to_thread(self.plugin.store.web_delete_many, items)
+        return {"deleted": deleted}
 
     @endpoint
     async def settings(self) -> dict:

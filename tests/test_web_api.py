@@ -83,7 +83,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_endpoints_require_the_dashboard_admin(self):
         for username in (None, "", "member", "ADMIN"):
-            for method in ("state", "quotes", "save", "delete", "settings"):
+            for method in ("state", "quotes", "save", "delete", "delete_many", "settings"):
                 with self.subTest(username=username, method=method):
                     self.assertEqual((await self.call(method, username=username))["code"], 403)
 
@@ -110,6 +110,104 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         for query in ({"page": "abc"}, {"page": "0"}, {"page_size": "101"}, {"query": "a" * 201}):
             with self.subTest(query=query):
                 self.assertEqual((await self.call("quotes", query=query))["code"], 400)
+
+    async def test_multiple_libraries_filter_matches_any_selected_name_with_scope_and_search(self):
+        self.plugin.store.add(self.scope, "示例库甲", [Quote("共同文本甲"), Quote("其他文本")], "1")
+        self.plugin.store.add(self.scope, "示例库乙", [Quote("共同文本乙")], "1")
+        self.plugin.store.add(self.scope, "示例库丙", [Quote("共同文本丙")], "1")
+        self.plugin.store.add(self.other_scope, "示例库甲", [Quote("共同文本其他群")], "1")
+        names = json.dumps(["示例库甲", "示例库乙"], ensure_ascii=False)
+        result = await self.call("quotes", query={"scope": self.scope, "keywords": names, "query": "共同", "page_size": "1"})
+        self.assertEqual(result["data"]["total"], 2)
+        first = result["data"]["items"][0]
+        result = await self.call("quotes", query={"scope": self.scope, "keywords": names, "query": "共同", "page_size": "1", "page": "2"})
+        second = result["data"]["items"][0]
+        self.assertEqual({first["keyword"], second["keyword"]}, {"示例库甲", "示例库乙"})
+        self.assertEqual({first["scope"], second["scope"]}, {self.scope})
+
+    async def test_multiple_library_filter_accepts_aliases_without_duplicate_rows(self):
+        self.plugin.store.configure_aliases({"嘉然": "嘉然", "示例别名": "嘉然"})
+        result = await self.call("quotes", query={"keywords": json.dumps(["嘉然", "示例别名", "嘉然"])})
+        self.assertEqual(result["data"]["total"], 1)
+        self.assertEqual(result["data"]["items"][0]["keyword"], "嘉然")
+
+    async def test_multiple_library_filter_is_literal_and_empty_selection_means_all(self):
+        self.plugin.store.add(self.scope, "库%'_", [Quote("文字")], "1")
+        selected = await self.call("quotes", query={"keywords": json.dumps(["库%'_"])})
+        self.assertEqual(selected["data"]["total"], 1)
+        self.assertEqual(selected["data"]["items"][0]["keyword"], "库%'_")
+        self.assertEqual((await self.call("quotes", query={"keywords": "[]"}))["data"]["total"], 2)
+        self.assertEqual((await self.call("quotes", query={"keywords": '["不存在"]'}))["data"]["total"], 0)
+
+    async def test_multiple_library_filter_input_validation(self):
+        for encoded in ("broken", '"库名"', "null", "{}", "[true]", "[null]", '[""]', '["a#b"]',
+                        json.dumps(["a\nb"]), json.dumps(["x" * 101]), json.dumps(["x"] * 101), "x" * 64001):
+            with self.subTest(encoded=encoded[:40]):
+                self.assertEqual((await self.call("quotes", query={"keywords": encoded}))["code"], 400)
+        self.assertEqual((await self.call("quotes", query={"keyword": "甲", "keywords": '["乙"]'}))["code"], 400)
+
+    def batch_payload(self, rows=None):
+        rows = self.plugin.store.web_list()["items"] if rows is None else rows
+        return {"items": [{"id": row["id"], "version": row["version"]} for row in rows]}
+
+    async def test_batch_delete_removes_only_selected_quotes_across_libraries_and_sessions(self):
+        self.plugin.store.add(self.other_scope, "示例库", [Quote("其他会话的选中项"), Quote("保留的内容")], "1")
+        rows = self.plugin.store.web_list()["items"]
+        selected = [row for row in rows if row["body"] != "保留的内容"]
+        result = await self.call("delete_many", self.batch_payload(selected))
+        self.assertEqual(result, {"code": 200, "data": {"deleted": 2}})
+        self.assertEqual([row["body"] for row in self.plugin.store.web_list()["items"]], ["保留的内容"])
+        scopes = {row["scope"] for row in self.plugin.store.web_overview()["scopes"]}
+        self.assertEqual(scopes, {self.scope, self.other_scope})
+
+    async def test_batch_delete_rejects_everything_if_one_quote_was_edited(self):
+        self.plugin.store.add(self.scope, "示例库", [Quote("第二条")], "1")
+        payload = self.batch_payload()
+        row = self.row()
+        self.plugin.store.web_save(scope=row["scope"], keyword=row["keyword"], body="已经修改",
+                                   collector_id="web:admin", quote_id=row["id"], version=row["version"])
+        result = await self.call("delete_many", payload)
+        self.assertEqual(result["code"], 409)
+        self.assertEqual(self.plugin.store.web_list()["total"], 2)
+        self.assertIn("未删除任何", result["message"])
+
+    async def test_batch_delete_rejects_everything_if_one_quote_was_deleted(self):
+        self.plugin.store.add(self.scope, "示例库", [Quote("第二条")], "1")
+        payload = self.batch_payload()
+        row = self.row()
+        self.plugin.store.web_delete(row["id"], row["version"])
+        result = await self.call("delete_many", payload)
+        self.assertEqual(result["code"], 404)
+        self.assertEqual(self.plugin.store.web_list()["total"], 1)
+
+    async def test_batch_delete_rejects_malformed_empty_oversized_and_duplicate_selections(self):
+        item = self.batch_payload()["items"][0]
+        for payload in ({}, {"items": []}, {"items": {}}, {"items": [None]}, {"items": [True]},
+                        {"items": [item, item]}, {"items": [item] * 501},
+                        {"items": [{"id": True, "version": item["version"]}]},
+                        {"items": [{"id": item["id"], "version": "bad"}]},
+                        {"items": [item, {"id": -1, "version": item["version"]}]}):
+            with self.subTest(keys=list(payload)):
+                self.assertEqual((await self.call("delete_many", payload))["code"], 400)
+                self.assertEqual(self.plugin.store.web_list()["total"], 1)
+
+    async def test_batch_delete_rolls_back_if_the_database_write_fails_partway(self):
+        self.plugin.store.add(self.scope, "示例库", [Quote("第二条")], "1")
+        payload = self.batch_payload()
+        failure_id = payload["items"][1]["id"]
+        with self.plugin.store._connect() as conn:
+            conn.execute(f"CREATE TRIGGER fail_batch BEFORE DELETE ON quotes WHEN OLD.id={failure_id} BEGIN SELECT RAISE(ABORT, 'simulated failure'); END")
+        with self.assertLogs("quote-web-tests", level="ERROR"):
+            result = await self.call("delete_many", payload)
+        self.assertEqual(result["code"], 500)
+        self.assertEqual(self.plugin.store.web_list()["total"], 2)
+
+    async def test_batch_delete_accepts_the_documented_selection_limit(self):
+        self.plugin.store.add(self.scope, "示例库", [Quote(f"原文 {i}") for i in range(499)], "1")
+        rows = self.plugin.store.web_list(page_size=500)["items"]
+        result = await self.call("delete_many", self.batch_payload(rows))
+        self.assertEqual(result, {"code": 200, "data": {"deleted": 500}})
+        self.assertEqual(self.plugin.store.web_list()["total"], 0)
 
     async def test_web_create_is_visible_to_qq_query(self):
         response = await self.call("save", {"scope": self.scope, "keyword": "新词", "body": " WebUI 添加\n第二行 "})
@@ -213,7 +311,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
     async def test_registration_and_unload_remove_only_owned_routes(self):
         self.plugin.context.registered_web_apis.append(("/other/ping", object(), ["GET"], "other"))
         self.api.register()
-        self.assertEqual(len(self.plugin.context.registered_web_apis), 6)
+        self.assertEqual(len(self.plugin.context.registered_web_apis), 7)
         self.api.close()
         self.assertEqual(len(self.plugin.context.registered_web_apis), 1)
         self.assertEqual((await self.call("state"))["code"], 503)
@@ -224,7 +322,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(sys.modules, {"astrbot.api": api_module}):
             await self.plugin.initialize()
         self.assertIsNotNone(self.plugin.web_ui)
-        self.assertEqual(len(self.plugin.context.registered_web_apis), 5)
+        self.assertEqual(len(self.plugin.context.registered_web_apis), 6)
         await self.plugin.terminate()
         self.assertEqual(self.plugin.context.registered_web_apis, [])
 

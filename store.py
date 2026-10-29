@@ -13,6 +13,9 @@ from pathlib import Path
 
 from .core import UserError, clean_text
 
+MAX_WEB_LIBRARIES = 100
+MAX_WEB_SELECTION = 500
+
 
 class QuoteConflict(UserError):
     """A duplicate or a quote changed in another window."""
@@ -251,7 +254,7 @@ class QuoteStore:
         counts["scopes"] = len(scopes)
         return {"stats": counts, "scopes": scopes, "keywords": keywords}
 
-    def web_list(self, *, scope: str = "", keyword: str = "", query: str = "",
+    def web_list(self, *, scope: str = "", keyword: str = "", keywords: tuple[str, ...] = (), query: str = "",
                  page: int = 1, page_size: int = 20) -> dict:
         with self._connect() as conn:
             conn.execute("BEGIN")
@@ -259,9 +262,13 @@ class QuoteStore:
             if scope:
                 clauses.append("scope=?")
                 args.append(scope)
-            if keyword:
-                clauses.append("keyword=?")
-                args.append(self._canonical(conn, keyword))
+            names = tuple(dict.fromkeys(self._canonical(conn, name)
+                                       for name in ((keyword,) if keyword else ()) + tuple(keywords)))
+            if len(names) > MAX_WEB_LIBRARIES:
+                raise UserError(f"一次最多筛选 {MAX_WEB_LIBRARIES} 个语录库。")
+            if names:
+                clauses.append("keyword IN (" + ",".join("?" for _ in names) + ")")
+                args.extend(names)
             if query:
                 clauses.append("(instr(body, ?)>0 OR instr(keyword, ?)>0 OR keyword IN (SELECT keyword FROM quote_aliases WHERE alias=?))")
                 args.extend([query, query, query])
@@ -315,3 +322,21 @@ class QuoteStore:
             if self._web_row(row)["version"] != version:
                 raise QuoteConflict("这条语录已在其他位置修改，请刷新后重新确认删除。")
             conn.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+
+    def web_delete_many(self, items: list[tuple[int, str]]) -> int:
+        """Check every selected version, then delete the entire selection atomically."""
+        if not 1 <= len(items) <= MAX_WEB_SELECTION:
+            raise UserError(f"请选择 1～{MAX_WEB_SELECTION} 条语录。")
+        ids = [quote_id for quote_id, _ in items]
+        if len(ids) != len(set(ids)):
+            raise UserError("选择中包含重复的语录编号，请刷新后重新选择。")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for quote_id, version in items:
+                row = conn.execute("SELECT * FROM quotes WHERE id=?", (quote_id,)).fetchone()
+                if row is None:
+                    raise QuoteNotFound("所选语录中有内容已被删除，本次未删除任何语录。请刷新后重新选择。")
+                if self._web_row(row)["version"] != version:
+                    raise QuoteConflict("所选语录中有内容已被修改，本次未删除任何语录。请刷新后重新确认。")
+            conn.executemany("DELETE FROM quotes WHERE id=?", ((quote_id,) for quote_id in ids))
+        return len(ids)

@@ -33,7 +33,7 @@
 
     <section class="statistics" aria-label="语录统计">
       <div class="stat"><span>语录总数</span><strong id="stat-quotes">—</strong></div>
-      <div class="stat"><span>关键词</span><strong id="stat-keywords">—</strong></div>
+      <div class="stat"><span>语录库</span><strong id="stat-keywords">—</strong></div>
       <div class="stat"><span>会话</span><strong id="stat-scopes">—</strong></div>
     </section>
 
@@ -44,15 +44,19 @@
 
     <section id="panel-quotes" role="tabpanel" aria-labelledby="tab-quotes">
       <form class="filter-bar" id="filters" role="search">
-        <label class="search-field"><span class="sr-only">搜索语录内容或关键词</span><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="search" type="search" placeholder="搜索语录内容或关键词…" maxlength="200" autocomplete="off"></label>
+        <label class="search-field"><span class="sr-only">搜索语录内容或库名</span><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="search" type="search" placeholder="搜索语录内容或库名…" maxlength="200" autocomplete="off"></label>
         <label><span class="sr-only">按会话筛选</span><select id="scope-filter"><option value="">全部会话</option></select></label>
-        <label><span class="sr-only">按关键词筛选</span><select id="keyword-filter"><option value="">全部关键词</option></select></label>
+        <details id="library-filter" class="library-filter">
+          <summary id="library-summary"><span class="sr-only">按库名筛选：</span><span id="library-filter-label">全部语录库</span><span class="filter-chevron" aria-hidden="true">⌄</span></summary>
+          <div class="library-panel"><label class="library-search"><span class="sr-only">搜索库名</span><input id="library-search" type="search" placeholder="搜索库名…" maxlength="100" autocomplete="off"></label><div class="library-panel-header"><span>语录库（可多选）</span><button id="clear-libraries" class="text-button" type="button">重置</button></div><div id="library-options" class="library-options" role="group" aria-label="库名列表"></div><p id="library-empty" class="field-hint" hidden>没有匹配的语录库。</p></div>
+        </details>
         <button class="text-button clear-filter" type="button" id="clear-filters">清除筛选</button>
       </form>
+      <div class="batch-bar"><div class="selection-controls"><label class="select-page"><input id="select-page" type="checkbox" disabled>全选本页</label><span id="selection-count" role="status" aria-live="polite">已选 0 条</span><button id="clear-selection" type="button" class="text-button" disabled>取消选择</button></div><button id="batch-delete" type="button" class="button compact secondary batch-delete" disabled><svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>批量删除</button></div>
       <div class="table-region" id="table-region" aria-busy="true">
         <table class="quote-table">
-          <colgroup><col class="col-content"><col class="col-keyword"><col class="col-scope"><col class="col-actions"></colgroup>
-          <thead><tr><th scope="col">语录内容</th><th scope="col">关键词</th><th scope="col">所属会话</th><th scope="col">操作</th></tr></thead>
+          <colgroup><col class="col-selection"><col class="col-content"><col class="col-keyword"><col class="col-scope"><col class="col-actions"></colgroup>
+          <thead><tr><th scope="col"><span class="sr-only">选择语录</span></th><th scope="col">语录内容</th><th scope="col">库名</th><th scope="col">所属会话</th><th scope="col">操作</th></tr></thead>
           <tbody id="quote-rows"></tbody>
         </table>
         <div id="empty" class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#icon-book"/></svg><h2 id="empty-title">正在加载语录</h2><p id="empty-description">连接 AstrBot 语录库…</p></div>
@@ -85,7 +89,7 @@
       <header class="dialog-header"><h2 id="quote-dialog-title">添加语录</h2><button type="button" class="icon-button" data-close="quote-dialog" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button></header>
       <label class="field">所属会话<select id="quote-scope" required></select></label>
       <p id="scope-help" class="field-hint">语录只会出现在选中的会话中。</p>
-      <label class="field">关键词<input id="quote-keyword" maxlength="100" required placeholder="例如：嘉然" autocomplete="off"></label>
+      <label class="field">库名（主词条）<input id="quote-keyword" maxlength="100" required placeholder="例如：示例人物" autocomplete="off"></label>
       <label class="field">语录内容<textarea id="quote-body" rows="7" maxlength="30000" required placeholder="写下想保存的那句话，支持换行。"></textarea></label>
       <div class="character-count"><span>保留内部空格与换行</span><span id="body-count">0 / 30000</span></div>
       <div id="quote-error" class="form-error" role="alert" hidden></div>
@@ -102,7 +106,9 @@
     </form>
   </dialog>
 
-  <template id="quote-row-template"><tr><td class="quote-content" data-label="语录内容"><p class="quote-text"></p><span class="quote-meta"></span></td><td data-label="关键词"><span class="keyword-tag"></span></td><td class="scope-cell" data-label="所属会话"><span class="scope-label"></span><span class="scope-detail"></span></td><td class="actions-cell" data-label="操作"><div class="row-actions"><button class="text-button edit-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-edit"/></svg>编辑</button><span class="action-divider" aria-hidden="true"></span><button class="text-button delete-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>删除</button></div></td></tr></template>
+  <dialog id="batch-dialog" class="dialog" aria-labelledby="batch-dialog-title"><form id="batch-form" class="dialog-form"><header class="dialog-header"><h2 id="batch-dialog-title">批量删除语录？</h2><button type="button" class="icon-button" data-close="batch-dialog" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button></header><p id="batch-description" class="delete-description"></p><ol id="batch-preview" class="batch-preview"></ol><div id="batch-error" class="form-error" role="alert" hidden></div><footer class="dialog-footer"><button type="button" class="button secondary" data-close="batch-dialog">取消</button><button id="confirm-batch-delete" class="button danger" type="submit">确认删除所选</button></footer></form></dialog>
+
+  <template id="quote-row-template"><tr><td class="selection-cell"><input class="row-select" type="checkbox"></td><td class="quote-content" data-label="语录内容"><p class="quote-text"></p><span class="quote-meta"></span></td><td class="keyword-cell" data-label="库名"><span class="keyword-tag"></span></td><td class="scope-cell" data-label="所属会话"><span class="scope-label"></span><span class="scope-detail"></span></td><td class="actions-cell" data-label="操作"><div class="row-actions"><button class="text-button edit-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-edit"/></svg>编辑</button><span class="action-divider" aria-hidden="true"></span><button class="text-button delete-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>删除</button></div></td></tr></template>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="./app.js"></script>
 </body>

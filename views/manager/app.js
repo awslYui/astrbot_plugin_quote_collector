@@ -1,7 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const state = { scopes: [], keywords: [], items: [], page: 1, pageSize: 6, total: 0,
-  scope: "", keyword: "", query: "", ready: false, canSaveSettings: false };
+  scope: "", libraries: [], query: "", ready: false, canSaveSettings: false,
+  selection: new Map(), loading: false, listReady: false, limits: {filter_libraries: 100, selection: 500} };
 const listFields = ["source_bot_qqs", "enabled_groups", "admin_qqs", "ignore_node_patterns", "keyword_aliases"];
 const boolFields = ["auto_collect", "answer_queries", "notify_import"];
 const numberFields = ["query_timeout", "max_import_quotes"];
@@ -12,6 +13,8 @@ let editing = null;
 let deleting = null;
 let settingsDirty = false;
 let starting = false;
+let batchDeleting = [];
+let batchBusy = false;
 
 function message(id, text) {
   $(id).textContent = text;
@@ -59,14 +62,78 @@ async function loadState() {
   state.scopes = data.scopes;
   state.keywords = data.keywords;
   state.canSaveSettings = Boolean(data.can_save_settings);
+  state.limits = data.limits || state.limits;
   for (const key of ["quotes", "keywords", "scopes"]) $("stat-" + key).textContent = data.stats[key].toLocaleString("zh-CN");
   const scopes = state.scopes.map((item) => ({ value: item.scope, label: item.label + " · " + item.detail }));
   fillSelect($("scope-filter"), scopes, "全部会话", state.scope);
-  fillSelect($("keyword-filter"), state.keywords.map((item) => ({ value: item.keyword, label: item.keyword })), "全部关键词", state.keyword);
   // Remove filters that no longer exist after an edit/deletion in another tab.
   state.scope = $("scope-filter").value;
-  state.keyword = $("keyword-filter").value;
+  state.libraries = state.libraries.filter(name => state.keywords.some(item => item.keyword === name));
+  renderLibraries();
   if (!settingsDirty) fillSettings(data.settings);
+}
+
+function renderLibraries() {
+  const search = $("library-search").value.trim().toLocaleLowerCase();
+  const options = document.createDocumentFragment();
+  let count = 0;
+  for (const library of state.keywords) {
+    if (!library.keyword.toLocaleLowerCase().includes(search)) continue;
+    const label = document.createElement("label");
+    label.className = "library-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.setAttribute("aria-label", library.keyword);
+    input.checked = state.libraries.includes(library.keyword);
+    input.addEventListener("change", () => {
+      const selected = new Set(state.libraries);
+      if (input.checked) selected.add(library.keyword); else selected.delete(library.keyword);
+      if (selected.size > state.limits.filter_libraries) {
+        input.checked = false;
+        return notify(`一次最多筛选 ${state.limits.filter_libraries} 个语录库。`);
+      }
+      state.libraries = [...selected];
+      updateLibraryLabel();
+      if (state.ready) applyFilters();
+    });
+    const name = document.createElement("span");
+    name.textContent = library.keyword;
+    label.append(input, name);
+    options.append(label);
+    count++;
+  }
+  $("library-options").replaceChildren(options);
+  $("library-empty").hidden = count > 0;
+  updateLibraryLabel();
+}
+
+function updateLibraryLabel() {
+  $("library-filter-label").textContent = state.libraries.length === 1 ? state.libraries[0]
+    : state.libraries.length ? `已选 ${state.libraries.length} 个库` : "全部语录库";
+  $("library-summary").title = state.libraries.length ? state.libraries.join("、") : "按库名筛选，可多选";
+}
+
+function updateSelection() {
+  const count = state.selection.size;
+  const onPage = state.items.filter(quote => state.selection.has(quote.id)).length;
+  $("selection-count").textContent = `已选 ${count} 条${count ? "（可跨页）" : ""}`;
+  $("select-page").checked = state.items.length > 0 && onPage === state.items.length;
+  $("select-page").indeterminate = onPage > 0 && onPage < state.items.length;
+  const unavailable = state.loading || !state.listReady;
+  $("select-page").disabled = unavailable || !state.items.length;
+  $("clear-selection").disabled = !count;
+  $("batch-delete").disabled = !count || unavailable;
+  for (const input of $("quote-rows").querySelectorAll(".row-select")) {
+    input.checked = state.selection.has(Number(input.dataset.id));
+    input.disabled = unavailable;
+    input.closest("tr").classList.toggle("is-selected", input.checked);
+  }
+  for (const button of $("quote-rows").querySelectorAll("button")) button.disabled = unavailable;
+}
+
+function clearSelection() {
+  state.selection.clear();
+  updateSelection();
 }
 
 function displayDate(value) {
@@ -79,6 +146,16 @@ function renderRows() {
   const rows = document.createDocumentFragment();
   for (const quote of state.items) {
     const row = $("quote-row-template").content.cloneNode(true);
+    const selected = row.querySelector(".row-select");
+    selected.dataset.id = quote.id;
+    selected.setAttribute("aria-label", `选择语录 ${quote.id}`);
+    selected.addEventListener("change", () => {
+      if (selected.checked && state.selection.size >= state.limits.selection) {
+        notify(`一次最多选择 ${state.limits.selection} 条语录，请分批操作。`);
+      } else if (selected.checked) state.selection.set(quote.id, quote);
+      else state.selection.delete(quote.id);
+      updateSelection();
+    });
     row.querySelector(".quote-text").textContent = quote.body;
     row.querySelector(".quote-meta").textContent = `#${quote.id} · ${displayDate(quote.created_at)}`;
     row.querySelector(".keyword-tag").textContent = quote.keyword;
@@ -94,7 +171,7 @@ function renderRows() {
   }
   $("quote-rows").replaceChildren(rows);
   $("empty").hidden = state.items.length > 0;
-  const filtered = Boolean(state.query || state.keyword || state.scope);
+  const filtered = Boolean(state.query || state.libraries.length || state.scope);
   $("empty-title").textContent = filtered ? "没有找到匹配的语录" : "还没有收录语录";
   $("empty-description").textContent = filtered ? "换个关键词，或清除筛选再试试。" : "先在 QQ 群中发送“添加 关键词#语录”，此处就会出现对应会话。";
   $("result-count").textContent = `共 ${state.total.toLocaleString("zh-CN")} 条语录`;
@@ -102,32 +179,46 @@ function renderRows() {
   $("page-number").textContent = `${state.page} / ${pages}`;
   $("previous").disabled = state.page <= 1;
   $("next").disabled = state.page >= pages;
+  updateSelection();
 }
 
 async function loadQuotes() {
   const sequence = ++listSequence;
+  state.loading = true;
+  state.listReady = false;
+  updateSelection();
   $("table-region").setAttribute("aria-busy", "true");
   try {
     const data = await bridge.apiGet("ui/quotes", {
-      scope: state.scope, keyword: state.keyword, query: state.query,
+      scope: state.scope, keywords: JSON.stringify(state.libraries), query: state.query,
       page: state.page, page_size: state.pageSize,
     });
     if (sequence !== listSequence) return;
     state.items = data.items;
     state.total = data.total;
+    state.listReady = true;
     const pages = Math.max(1, Math.ceil(data.total / state.pageSize));
     if (state.page > pages) {
       state.page = pages;
       return await loadQuotes();
     }
     renderRows();
+  } catch (error) {
+    if (sequence === listSequence) throw error;
   } finally {
-    if (sequence === listSequence) $("table-region").setAttribute("aria-busy", "false");
+    if (sequence === listSequence) {
+      state.loading = false;
+      $("table-region").setAttribute("aria-busy", "false");
+      updateSelection();
+    }
   }
 }
 
 async function refresh() {
   if (!state.ready) return start();
+  listSequence++;
+  state.listReady = false;
+  clearSelection();
   $("refresh").disabled = true;
   message("error", "");
   try {
@@ -144,7 +235,7 @@ async function applyFilters() {
   clearTimeout(searchTimer);
   state.query = $("search").value.trim();
   state.scope = $("scope-filter").value;
-  state.keyword = $("keyword-filter").value;
+  clearSelection();
   state.page = 1;
   message("error", "");
   try { await loadQuotes(); } catch (error) { message("error", errorText(error)); }
@@ -173,7 +264,7 @@ function openEditor(quote = null) {
   const selected = quote?.scope || state.scope || (choices.length === 1 ? choices[0].value : "");
   fillSelect($("quote-scope"), choices, "请选择所属会话", selected);
   $("quote-scope").disabled = Boolean(quote);
-  $("quote-keyword").value = quote?.keyword || state.keyword;
+  $("quote-keyword").value = quote?.keyword || (state.libraries.length === 1 ? state.libraries[0] : "");
   $("quote-body").value = quote?.body || "";
   $("body-count").textContent = `${$("quote-body").value.length} / 30000`;
   $("save-quote").disabled = !choices.length;
@@ -187,10 +278,64 @@ function openDelete(quote) {
   message("delete-error", "");
   $("confirm-delete").disabled = false;
   $("delete-preview").textContent = quote.body;
-  $("delete-keyword").textContent = `关键词：${quote.keyword} · ${quote.label}`;
+  $("delete-keyword").textContent = `库名：${quote.keyword} · ${quote.label}`;
   $("delete-dialog").showModal();
   $("delete-dialog").querySelector("[data-close]").focus();
 }
+
+$("select-page").addEventListener("change", () => {
+  if (state.loading || !state.listReady) return updateSelection();
+  if ($("select-page").checked) {
+    const fresh = state.items.filter(quote => !state.selection.has(quote.id));
+    if (state.selection.size + fresh.length > state.limits.selection) {
+      notify(`一次最多选择 ${state.limits.selection} 条语录，请分批操作。`);
+    } else for (const quote of fresh) state.selection.set(quote.id, quote);
+  } else for (const quote of state.items) state.selection.delete(quote.id);
+  updateSelection();
+});
+$("clear-selection").addEventListener("click", clearSelection);
+$("batch-delete").addEventListener("click", () => {
+  if (!state.selection.size || state.loading || !state.listReady || batchBusy) return;
+  batchDeleting = [...state.selection.values()];
+  message("batch-error", "");
+  $("batch-dialog-title").textContent = `删除所选 ${batchDeleting.length} 条语录？`;
+  const libraries = new Set(batchDeleting.map(quote => quote.keyword)).size;
+  const scopes = new Set(batchDeleting.map(quote => quote.scope)).size;
+  $("batch-description").textContent = `将删除下方 ${libraries} 个库、${scopes} 个会话中的所选语录。请核对内容，其他语录不受影响。`;
+  const preview = document.createDocumentFragment();
+  for (const quote of batchDeleting) {
+    const item = document.createElement("li");
+    const title = document.createElement("strong");
+    title.textContent = `#${quote.id} · ${quote.keyword} · ${quote.label} · ${quote.detail}`;
+    const body = document.createElement("p");
+    body.textContent = quote.body.length > 160 ? quote.body.slice(0, 160) + "…" : quote.body;
+    item.append(title, body);
+    preview.append(item);
+  }
+  $("batch-preview").replaceChildren(preview);
+  $("batch-dialog").showModal();
+  $("batch-dialog").querySelector("[data-close]").focus();
+});
+$("batch-dialog").addEventListener("cancel", event => { if (batchBusy) event.preventDefault(); });
+$("batch-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (!batchDeleting.length || batchBusy) return;
+  batchBusy = true;
+  message("batch-error", "");
+  for (const button of $("batch-form").querySelectorAll("button")) button.disabled = true;
+  try {
+    const result = await bridge.apiPost("ui/delete_many", {items: batchDeleting.map(quote => ({id: quote.id, version: quote.version}))});
+    $("batch-dialog").close();
+    clearSelection();
+    notify(`已删除 ${result.deleted} 条语录。`);
+    await refresh();
+  } catch (error) {
+    message("batch-error", errorText(error));
+  } finally {
+    batchBusy = false;
+    for (const button of $("batch-form").querySelectorAll("button")) button.disabled = false;
+  }
+});
 
 $("quote-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -246,6 +391,8 @@ $("settings-form").addEventListener("submit", async (event) => {
   $("save-settings").disabled = true;
   try {
     const result = await bridge.apiPost("ui/settings", payload);
+    state.listReady = false;
+    clearSelection();
     fillSettings(result.settings);
     await loadState();
     await loadQuotes();
@@ -265,12 +412,32 @@ $("add").addEventListener("click", () => openEditor());
 $("search").addEventListener("input", () => {
   clearTimeout(searchTimer);
   listSequence++; // An older in-flight request must not replace the new search.
+  state.listReady = false;
+  clearSelection();
   if (state.ready) searchTimer = setTimeout(applyFilters, 250);
 });
 $("filters").addEventListener("submit", (event) => { event.preventDefault(); if (state.ready) applyFilters(); });
-for (const id of ["scope-filter", "keyword-filter"]) $(id).addEventListener("change", () => { if (state.ready) applyFilters(); });
+$("scope-filter").addEventListener("change", () => { if (state.ready) applyFilters(); });
+$("library-search").addEventListener("input", renderLibraries);
+$("clear-libraries").addEventListener("click", () => {
+  state.libraries = [];
+  $("library-search").value = "";
+  renderLibraries();
+  if (state.ready) applyFilters();
+});
+document.addEventListener("click", event => {
+  if (!$("library-filter").contains(event.target)) $("library-filter").open = false;
+});
+$("library-filter").addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    $("library-filter").open = false;
+    $("library-summary").focus();
+  }
+});
 $("clear-filters").addEventListener("click", () => {
-  $("search").value = $("scope-filter").value = $("keyword-filter").value = "";
+  $("search").value = $("scope-filter").value = $("library-search").value = "";
+  state.libraries = [];
+  renderLibraries();
   if (state.ready) applyFilters();
 });
 for (const [id, delta] of [["previous", -1], ["next", 1]]) $(id).addEventListener("click", async () => {

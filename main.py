@@ -21,6 +21,8 @@ from .store import Quote, QuoteStore
 
 
 HELP = """语录插件（指令前可加 /）
+来点关键词：查询该人物的语录，例如 来点示例人物
+来点关键词#2：查看第 2 页
 查 关键词：以合并聊天记录输出语录
 查 关键词#2：查看第 2 页
 添加 关键词#语录：添加一条语录
@@ -31,6 +33,7 @@ HELP = """语录插件（指令前可加 /）
 语录帮助：查看本说明
 
 自动收录：在插件配置填入来源机器人的 QQ；在同群发送 查 关键词，插件会收录随后返回的合并聊天记录。每群的语录独立保存。
+也支持 来点关键词 发起查询和收录；单独发送人物名字或别名不会触发语录。
 原记录含“主库”时，以该人物 ID 作为主词条；“触发词”作为查询别名。
 可在 WebUI 的“人物别名”中配置 主词条#别名#别名，查询、添加和删除共用同一语录库。
 本插件收录文本；表情转为 [表情:ID]、@ 转为文字。图片、语音和视频本体不保存。"""
@@ -127,7 +130,7 @@ class QuoteCollectorPlugin(Star):
             message = self._message(event)
             return bool(group_id and contains_forward(message)
                         and self.tracker.match(self._scope(event), reply_id(message)))
-        return bool(re.match(r"^[／/]?(?:语录帮助$|复刻(?:\s|$)|(?:查|添加|删除|偷)(?:\s|$))", self._text(event).strip()))
+        return bool(re.match(r"^[／/]?(?:语录帮助$|复刻(?:\s|$)|来点|(?:查|添加|删除|偷)(?:\s|$))", self._text(event).strip()))
 
     @staticmethod
     def _scope(event: AstrMessageEvent) -> str:
@@ -254,7 +257,7 @@ class QuoteCollectorPlugin(Star):
             query = parse_command(text)
         except UserError:
             return None
-        return self.canonical_keyword(query.keyword) if query and query.action == "查" and query.page == 1 else None
+        return self.canonical_keyword(query.keyword) if query and query.action in {"查", "来点"} and query.page == 1 else None
 
     async def _replicate(self, event: AstrMessageEvent) -> None:
         reference = await self._reference(event)
@@ -305,15 +308,18 @@ class QuoteCollectorPlugin(Star):
     async def _query(self, event: AstrMessageEvent, command: Command, waiting: bool) -> None:
         if not self.config.get("answer_queries", True):
             return
+        natural = command.action == "来点"
+        triggers = (command.trigger, "来点 " + command.trigger[2:]) if natural else ()
         quotes, total = await asyncio.to_thread(self.store.search, self._scope(event), command.keyword,
-                                                command.page, self.page_size)
+                                                command.page, self.page_size, exact_only=natural, triggers=triggers)
         if not total:
             if not waiting:
                 await self._say(event, f"还没有【{command.keyword}】的语录。可用 添加 {command.keyword}#语录，或引用聊天记录后发送 偷 {command.keyword}。")
             return
         pages = math.ceil(total / self.page_size)
+        query_text = command.trigger if natural else f"查 {command.keyword}"
         if command.page > pages:
-            raise UserError(f"【{command.keyword}】共 {pages} 页，请使用 查 {command.keyword}#1 至 #{pages}。")
+            raise UserError(f"【{command.keyword}】共 {pages} 页，请使用 {query_text}#1 至 #{pages}。")
         nodes = [{"type": "node", "data": {
             "user_id": str(event.get_self_id()), "nickname": f"{quote.keyword} · #{quote.id}",
             "content": [{"type": "text", "data": {"text": quote.body}}],
@@ -329,7 +335,7 @@ class QuoteCollectorPlugin(Star):
             for start in range(0, len(text), 3500):
                 await self._say(event, text[start:start + 3500])
         if pages > 1:
-            following = f"下一页：查 {command.keyword}#{command.page + 1}" if command.page < pages else "已到最后一页。"
+            following = f"下一页：{query_text}#{command.page + 1}" if command.page < pages else "已到最后一页。"
             await self._say(event, f"【{command.keyword}】共 {total} 条，第 {command.page}/{pages} 页。{following}")
 
     async def _collect(self, event: AstrMessageEvent) -> None:
@@ -397,7 +403,7 @@ class QuoteCollectorPlugin(Star):
             command = replace(command, keyword=self.canonical_keyword(command.keyword))
             event.stop_event()
             event.should_call_llm(False)
-            if command.action == "查":
+            if command.action in {"查", "来点"}:
                 waiting = bool(group_id and self.sources and self.config.get("auto_collect", True))
                 if group_id and self.sources and command.page == 1:
                     self.tracker.add(self._scope(event), str(event.message_obj.message_id), command.keyword)

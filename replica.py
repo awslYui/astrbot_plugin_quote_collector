@@ -51,12 +51,12 @@ def keyword_hint(value: str, *, text_header: bool = False) -> str | None:
         if match:
             return check_keyword(match.group(1))
     # An actual query copied into the existing record is explicit provenance.
-    if re.match(r"^[／/]?查\s", value):
+    if re.match(r"^[／/]?查\s", value) or (not text_header and re.match(r"^[／/]?来点", value)):
         try:
             command = parse_command(value)
         except UserError:
             return None
-        if command is not None and command.action == "查" and command.page == 1:
+        if command is not None and command.action in {"查", "来点"} and command.page == 1:
             return command.keyword
     return None
 

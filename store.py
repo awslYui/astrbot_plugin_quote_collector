@@ -161,7 +161,8 @@ class QuoteStore:
                 keywords.update(row[0] for row in rows)
         return keywords
 
-    def search(self, scope: str, keyword: str, page: int, page_size: int) -> tuple[list[StoredQuote], int]:
+    def search(self, scope: str, keyword: str, page: int, page_size: int, *,
+               exact_only: bool = False, triggers: tuple[str, ...] = ()) -> tuple[list[StoredQuote], int]:
         with self._connect() as conn:
             conn.execute("BEGIN")
             keyword = self._canonical(conn, keyword)
@@ -169,14 +170,27 @@ class QuoteStore:
             # to the same rows, so multiple triggers never copy the quote data.
             exact = conn.execute("SELECT 1 FROM quotes WHERE scope=? AND keyword=? LIMIT 1", (scope, keyword)).fetchone()
             alias_where = "scope=? AND keyword IN (SELECT keyword FROM quote_sources WHERE scope=? AND kind='trigger' AND source_id=?)"
-            alias_args = (scope, scope, keyword)
             if exact:
                 where, args = "scope=? AND keyword=?", (scope, keyword)
-            elif conn.execute(f"SELECT 1 FROM quotes WHERE {alias_where} LIMIT 1", alias_args).fetchone():
-                where, args = alias_where, alias_args
             else:
-                # Literal substring fallback; '%' and '_' are not wildcards.
-                where, args = "scope=? AND (instr(keyword, ?)>0 OR instr(body, ?)>0)", (scope, keyword, keyword)
+                where, args = "scope=? AND keyword=?", (scope, keyword)
+                for alias in dict.fromkeys((*triggers, keyword)):
+                    # A full original trigger can differ from the main ID and
+                    # still point to that person's existing canonical rows.
+                    canonical = self._canonical(conn, alias)
+                    if canonical != alias and conn.execute(
+                        "SELECT 1 FROM quotes WHERE scope=? AND keyword=? LIMIT 1", (scope, canonical)
+                    ).fetchone():
+                        where, args = "scope=? AND keyword=?", (scope, canonical)
+                        break
+                    alias_args = (scope, scope, alias)
+                    if conn.execute(f"SELECT 1 FROM quotes WHERE {alias_where} LIMIT 1", alias_args).fetchone():
+                        where, args = alias_where, alias_args
+                        break
+                else:
+                    if not exact_only:
+                        # Literal substring fallback; '%' and '_' are not wildcards.
+                        where, args = "scope=? AND (instr(keyword, ?)>0 OR instr(body, ?)>0)", (scope, keyword, keyword)
             count = conn.execute(f"SELECT COUNT(*) FROM quotes WHERE {where}", args).fetchone()[0]
             rows = conn.execute(f"SELECT id, keyword, body FROM quotes WHERE {where} ORDER BY id LIMIT ? OFFSET ?",
                                 (*args, page_size, (page - 1) * page_size)).fetchall()

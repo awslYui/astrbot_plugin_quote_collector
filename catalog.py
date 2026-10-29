@@ -160,7 +160,7 @@ def parse_catalog(quotes: list[Quote], *, limit: int = 2000) -> CatalogPlan | No
         elif item is not None and not item.closing():
             item.lines.append(line)
             item.owners.add(owner_index)
-        elif block is None and (stripped == "语录查询结果" or re.fullmatch(r"[／/]?查\s+.+", stripped)):
+        elif block is None and (stripped == "语录查询结果" or re.fullmatch(r"[／/]?(?:查\s+.+|来点\s*.+)", stripped)):
             continue
         else:
             raise UserError("原语录列表中含有无法对应编号的内容，本次未写入。请单独引用完整的原语录记录。")

@@ -50,10 +50,11 @@ class Command:
     keyword: str = ""
     body: str | None = None
     page: int = 1
+    trigger: str = ""
 
 
 def parse_command(text: str) -> Command | None:
-    """Require a space after verbs; preserve spaces/newlines/# in the body."""
+    """Recognize explicit commands, including 来点name; ignore bare names."""
     text = text.strip()
     if text.startswith(("/", "／")):
         text = text[1:].lstrip()
@@ -63,17 +64,25 @@ def parse_command(text: str) -> Command | None:
         return Command("复刻")
     if re.match(r"^复刻\s", text):
         raise UserError("复刻只接受现有的合并聊天记录：请引用原记录后直接发送“复刻”，不填写新关键词或语录。")
-    match = re.fullmatch(r"(查|添加|删除|偷)(?:\s+([\s\S]*))?", text)
-    if not match:
-        return None
-    action, payload = match.group(1), (match.group(2) or "").strip()
+    if text.startswith("来点"):
+        action, payload = "来点", text[2:].strip()
+    else:
+        match = re.fullmatch(r"(查|添加|删除|偷)(?:\s+([\s\S]*))?", text)
+        if not match:
+            return None
+        action, payload = match.group(1), (match.group(2) or "").strip()
     if not payload:
+        if action == "来点":
+            raise UserError("用法：来点关键词，例如 来点示例人物；单独发送人物名字不会触发语录。")
         raise UserError("用法：查 关键词；添加 关键词#语录；引用消息后 添加 关键词；删除 关键词#语录；引用聊天记录后 偷 关键词。")
-    if action == "查":
+    if action in {"查", "来点"}:
         keyword, separator, page = payload.partition("#")
         if separator and (not page.isdecimal() or len(page) > 6 or int(page) < 1):
-            raise UserError("翻页用法：查 关键词#页码，例如 查 嘉然#2。")
-        return Command(action, check_keyword(keyword), page=int(page) if separator else 1)
+            example = "来点示例人物#2" if action == "来点" else "查 示例人物#2"
+            raise UserError(f"翻页用法：{example}，# 后填写大于 0 的页码。")
+        keyword = check_keyword(keyword)
+        return Command(action, keyword, page=int(page) if separator else 1,
+                       trigger="来点" + keyword if action == "来点" else "")
     if action in {"添加", "删除"}:
         keyword, separator, body = payload.partition("#")
         keyword = check_keyword(keyword)

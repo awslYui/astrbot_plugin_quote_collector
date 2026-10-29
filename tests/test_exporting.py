@@ -185,15 +185,18 @@ class ExportWorkflowTests(unittest.IsolatedAsyncioTestCase):
     def query_nodes(self):
         return [params["messages"] for action, params in self.bot.calls if action.startswith("send_")][-1]
 
-    async def test_query_ignores_natural_page_size_and_keeps_natural_request_behavior(self):
+    async def test_catalog_shows_all_rows_while_prefix_returns_one_random_text(self):
         event = await self.dispatch("添加 示例人物#第一条")
         self.plugin.store.add(self.plugin._scope(event), "示例人物", [Quote("第二条")], "1")
         await self.dispatch("查 示例人物")
         nodes = self.query_nodes()
         page = parse_catalog([Quote(node["data"]["content"][0]["data"]["text"]) for node in nodes])
         self.assertEqual([quote.body for quote in page.groups["示例人物"]], ["第一条", "第二条"])
-        await self.dispatch("来点示例人物")
-        self.assertEqual(self.query_nodes()[0]["data"]["content"][0]["data"]["text"], "第一条")
+        self.bot.calls.clear()
+        with patch("astrbot_plugin_quote_collector.store.random.randrange", return_value=1):
+            result = await self.dispatch("来点示例人物")
+        self.assertEqual(result.sent, ["第二条"])
+        self.assertEqual(self.bot.calls, [])
 
     async def test_exported_long_quote_can_be_replicated_with_one_item_import_limit(self):
         body = "很长的原文" * 3000

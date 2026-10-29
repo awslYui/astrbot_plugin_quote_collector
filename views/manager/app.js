@@ -4,7 +4,7 @@ const state = { scopes: [], keywords: [], items: [], page: 1, pageSize: 6, total
   scope: "", keyword: "", query: "", ready: false, canSaveSettings: false };
 const listFields = ["source_bot_qqs", "enabled_groups", "admin_qqs", "ignore_node_patterns", "keyword_aliases"];
 const boolFields = ["auto_collect", "answer_queries", "notify_import"];
-const numberFields = ["query_timeout", "page_size", "max_import_quotes"];
+const numberFields = ["query_timeout", "max_import_quotes"];
 let listSequence = 0;
 let searchTimer;
 let toastTimer;

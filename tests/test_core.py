@@ -121,6 +121,39 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.store.delete("g2", "a", "b"), 0)
         self.assertEqual(self.store.search("g1", "a", 1, 40)[1], 1)
 
+    def test_random_selection_covers_all_rows_despite_deleted_id_gaps(self):
+        self.store.add("g", "示例人物", [Quote(f"原文 {i}") for i in range(80)], "1")
+        self.store.delete("g", "示例人物", "原文 3")
+        self.store.delete("g", "示例人物", "原文 50")
+        expected = [f"原文 {i}" for i in range(80) if i not in {3, 50}]
+        with patch("astrbot_plugin_quote_collector.store.random.randrange", side_effect=range(78)) as choose:
+            actual = [self.store.random_quote("g", "示例人物").body for _ in expected]
+        self.assertEqual(actual, expected)
+        self.assertTrue(all(call.args == (78,) for call in choose.call_args_list))
+
+    def test_random_selection_uses_current_scope_and_exact_library(self):
+        self.store.add("g1", "示例人物", [Quote("正确原文")], "1")
+        self.store.add("g1", "示例人物甲", [Quote("相似名字")], "1")
+        self.store.add("g1", "其他人物", [Quote("正文提到示例人物")], "1")
+        self.store.add("g2", "示例人物", [Quote("其他群的原文")], "1")
+        self.assertEqual(self.store.random_quote("g1", "示例人物").body, "正确原文")
+        self.assertEqual(self.store.random_quote("g2", "示例人物").body, "其他群的原文")
+        with patch("astrbot_plugin_quote_collector.store.random.randrange") as choose:
+            self.assertIsNone(self.store.random_quote("g3", "示例人物"))
+            self.assertIsNone(self.store.random_quote("g1", "示例"))
+            self.assertIsNone(self.store.random_quote("g1", "正文"))
+            choose.assert_not_called()
+
+    def test_random_selection_supports_manual_aliases_and_shared_source_triggers(self):
+        self.store.configure_aliases({"示例人物": "示例人物", "demo": "示例人物"})
+        self.store.add_many("g", {"示例人物": [Quote("甲原文")], "另一人物": [Quote("乙原文")]}, "1",
+                            source_triggers={"示例人物": {"来点共同别名"}, "另一人物": {"来点共同别名"}})
+        self.assertEqual(self.store.random_quote("g", "demo").body, "甲原文")
+        with patch("astrbot_plugin_quote_collector.store.random.randrange", side_effect=[0, 1]) as choose:
+            actual = [self.store.random_quote("g", "共同别名", triggers=("来点共同别名",)).body for _ in range(2)]
+        self.assertEqual(actual, ["甲原文", "乙原文"])
+        self.assertTrue(all(call.args == (2,) for call in choose.call_args_list))
+
     def test_exact_keyword_has_priority_over_body_search(self):
         self.store.add("g", "a", [Quote("b")], "1")
         self.store.add("g", "other", [Quote("a quote")], "1")

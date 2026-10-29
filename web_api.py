@@ -15,7 +15,7 @@ from .store import QuoteConflict, QuoteNotFound
 
 PLUGIN_NAME = "astrbot_plugin_quote_collector"
 SCHEMA = json.loads(Path(__file__).with_name("_conf_schema.json").read_text(encoding="utf-8"))
-RANGES = {"query_timeout": (5, 300), "page_size": (1, 100), "max_import_quotes": (1, 10000)}
+RANGES = {"query_timeout": (5, 300), "max_import_quotes": (1, 10000)}
 
 
 def scope_details(scope: str) -> dict:

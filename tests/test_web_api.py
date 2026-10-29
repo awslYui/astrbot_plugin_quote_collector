@@ -173,11 +173,11 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settings_are_persisted_and_applied_without_reload(self):
         result = await self.call("settings", {"source_bot_qqs": ["888", "888"], "query_timeout": 80,
-                                               "answer_queries": False, "page_size": 10})
+                                               "answer_queries": False, "max_import_quotes": 10})
         self.assertEqual(result["code"], 200)
         self.assertEqual(self.plugin.sources, {"888"})
         self.assertEqual(self.plugin.tracker.ttl, 80)
-        self.assertEqual(self.plugin.page_size, 10)
+        self.assertEqual(self.plugin.import_limit, 10)
         self.assertEqual(json.loads(self.plugin.config.path.read_text())["source_bot_qqs"], ["888"])
         self.assertFalse(self.plugin.config["answer_queries"])
 
@@ -196,10 +196,19 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.plugin.sources, set())
 
     async def test_settings_validation_rules(self):
-        for payload in ({"unknown": True}, {"auto_collect": "false"}, {"page_size": True},
+        for payload in ({"unknown": True}, {"auto_collect": "false"}, {"max_import_quotes": True},
                         {"source_bot_qqs": ["not-a-qq"]}, {"ignore_node_patterns": ["["]}):
             with self.subTest(payload=payload):
                 self.assertEqual((await self.call("settings", payload))["code"], 400)
+
+    async def test_legacy_query_page_size_is_ignored_and_not_exposed_as_a_setting(self):
+        self.plugin.config["page_size"] = 1
+        self.plugin.refresh_config()
+        self.assertNotIn("page_size", self.api.current_settings())
+        self.assertFalse(hasattr(self.plugin, "page_size"))
+        result = await self.call("settings", {"max_import_quotes": 100})
+        self.assertEqual(result["code"], 200)
+        self.assertEqual(self.plugin.config["page_size"], 1)
 
     async def test_registration_and_unload_remove_only_owned_routes(self):
         self.plugin.context.registered_web_apis.append(("/other/ping", object(), ["GET"], "other"))

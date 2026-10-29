@@ -75,14 +75,17 @@ def parse_command(text: str) -> Command | None:
         if action == "来点":
             raise UserError("用法：来点关键词，例如 来点示例人物；单独发送人物名字不会触发语录。")
         raise UserError("用法：查 关键词；添加 关键词#语录；引用消息后 添加 关键词；删除 关键词#语录；引用聊天记录后 偷 关键词。")
-    if action in {"查", "来点"}:
+    if action == "来点":
+        if "#" in payload:
+            raise UserError("来点关键词 每次随机返回一条语录，不支持翻页；查看语录库请用 查 关键词，翻页用 查 关键词#2。")
+        keyword = check_keyword(payload)
+        return Command(action, keyword, trigger="来点" + keyword)
+    if action == "查":
         keyword, separator, page = payload.partition("#")
         if separator and (not page.isdecimal() or len(page) > 6 or int(page) < 1):
-            example = "来点示例人物#2" if action == "来点" else "查 示例人物#2"
-            raise UserError(f"翻页用法：{example}，# 后填写大于 0 的页码。")
+            raise UserError("翻页用法：查 示例人物#2，# 后填写大于 0 的页码。")
         keyword = check_keyword(keyword)
-        return Command(action, keyword, page=int(page) if separator else 1,
-                       trigger="来点" + keyword if action == "来点" else "")
+        return Command(action, keyword, page=int(page) if separator else 1)
     if action in {"添加", "删除"}:
         keyword, separator, body = payload.partition("#")
         keyword = check_keyword(keyword)

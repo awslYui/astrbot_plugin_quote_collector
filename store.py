@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 import hashlib
 import json
+import random
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -210,6 +211,18 @@ class QuoteStore:
             def total_for(name):
                 return conn.execute("SELECT COUNT(*) FROM quotes WHERE scope=? AND keyword=?", (scope, name)).fetchone()[0]
             return build_catalog_page((StoredQuote(**dict(row)) for row in rows), total_for, page)
+
+    def random_quote(self, scope: str, keyword: str, *, triggers: tuple[str, ...] = ()) -> StoredQuote | None:
+        """Sample every matching row equally without loading the whole library."""
+        with self._connect() as conn:
+            conn.execute("BEGIN")
+            where, args = self._search_where(conn, scope, keyword, exact_only=True, triggers=triggers)
+            count = conn.execute(f"SELECT COUNT(*) FROM quotes WHERE {where}", args).fetchone()[0]
+            if not count:
+                return None
+            row = conn.execute(f"SELECT id, keyword, body FROM quotes WHERE {where} ORDER BY id LIMIT 1 OFFSET ?",
+                               (*args, random.randrange(count))).fetchone()
+            return StoredQuote(**dict(row))
 
     def delete(self, scope: str, keyword: str, body: str) -> int:
         with self._connect() as conn:

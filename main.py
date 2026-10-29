@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import re
 from collections.abc import Mapping
 from dataclasses import replace
@@ -21,8 +20,7 @@ from .store import Quote, QuoteStore
 
 
 HELP = """语录插件（指令前可加 /）
-来点关键词：查询该人物的语录，例如 来点示例人物
-来点关键词#2：查看第 2 页
+来点关键词：随机返回一条该人物的语录，例如 来点示例人物
 查 关键词：以编号列表汇总展示语录库，长内容自动分块
 查 关键词#2：查看第 2 页
 添加 关键词#语录：添加一条语录
@@ -64,7 +62,6 @@ class QuoteCollectorPlugin(Star):
         self.sources = self._id_set("source_bot_qqs")
         self.admins = self._id_set("admin_qqs")
         self.groups = self._id_set("enabled_groups")
-        self.page_size = self._number("page_size", 40, 1, 100)
         self.import_limit = self._number("max_import_quotes", 2000, 1, 10000)
         self.tracker = QueryTracker(self._number("query_timeout", 60, 5, 300))
         self.ignore_patterns = []
@@ -311,10 +308,9 @@ class QuoteCollectorPlugin(Star):
         natural = command.action == "来点"
         if natural:
             triggers = (command.trigger, "来点 " + command.trigger[2:])
-            quotes, total = await asyncio.to_thread(self.store.search, self._scope(event), command.keyword,
-                                                    command.page, self.page_size, exact_only=True, triggers=triggers)
-            pages = math.ceil(total / self.page_size)
-            shown = len(quotes)
+            quote = await asyncio.to_thread(self.store.random_quote, self._scope(event), command.keyword,
+                                           triggers=triggers)
+            total = 1 if quote is not None else 0
         else:
             catalog = await asyncio.to_thread(self.store.catalog_page, self._scope(event), command.keyword, command.page)
             total, pages, shown = catalog.total, catalog.pages, catalog.shown
@@ -322,14 +318,14 @@ class QuoteCollectorPlugin(Star):
             if not waiting:
                 await self._say(event, f"还没有【{command.keyword}】的语录。可用 添加 {command.keyword}#语录，或引用聊天记录后发送 偷 {command.keyword}。")
             return
-        query_text = command.trigger if natural else f"查 {command.keyword}"
+        if natural:
+            await self._say(event, quote.body)
+            return
+        query_text = f"查 {command.keyword}"
         if command.page > pages:
             raise UserError(f"【{command.keyword}】共 {pages} 页，请使用 {query_text}#1 至 #{pages}。")
-        if natural:
-            contents = [(f"{quote.keyword} · #{quote.id}", quote.body) for quote in quotes]
-        else:
-            contents = [(f"语录库 · {index}/{len(catalog.fragments)}", fragment)
-                        for index, fragment in enumerate(catalog.fragments, 1)]
+        contents = [(f"语录库 · {index}/{len(catalog.fragments)}", fragment)
+                    for index, fragment in enumerate(catalog.fragments, 1)]
         nodes = [{"type": "node", "data": {
             "user_id": str(event.get_self_id()), "nickname": nickname,
             "content": [{"type": "text", "data": {"text": body}}],
@@ -346,7 +342,7 @@ class QuoteCollectorPlugin(Star):
                 await self._say(event, text[start:start + 3500])
         if pages > 1:
             following = f"下一页：{query_text}#{command.page + 1}" if command.page < pages else "已到最后一页。"
-            detail = f"本页展示 {shown} 条。" if not natural else ""
+            detail = f"本页展示 {shown} 条。"
             await self._say(event, f"【{command.keyword}】共 {total} 条，第 {command.page}/{pages} 页。{detail}{following}")
 
     async def _collect(self, event: AstrMessageEvent) -> None:

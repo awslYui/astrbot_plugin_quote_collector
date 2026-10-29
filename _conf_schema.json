@@ -46,12 +46,6 @@
     "type": "bool",
     "default": true
   },
-  "page_size": {
-    "description": "来点查询每页的语录条数",
-    "type": "int",
-    "default": 40,
-    "hint": "范围 1～100，仅用于 来点关键词#2。查 指令按文本容量分页，多条语录合并成少量聊天记录节点。"
-  },
   "max_import_quotes": {
     "description": "单次导入的语录上限",
     "type": "int",

@@ -1,0 +1,8 @@
+name: astrbot_plugin_quote_collector
+display_name: QQ 语录收录
+desc: 从另一只 QQ 机器人的合并聊天记录收录文本语录，支持关键词查询、引用添加与管理员删除。
+version: v1.3.0
+author: awslYui
+repo: https://github.com/awslYui/astrbot_plugin_quote_collector
+support_platforms:
+  - aiocqhttp

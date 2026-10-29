@@ -1,0 +1,8 @@
+{
+  "views": {
+    "manager": {
+      "title": "语录库",
+      "description": "搜索和管理各 QQ 会话的语录，配置来源与自动收录。"
+    }
+  }
+}

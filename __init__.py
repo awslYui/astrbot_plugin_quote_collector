@@ -1,0 +1,1 @@
+"""AstrBot QQ quote collector."""

@@ -1,0 +1,67 @@
+{
+  "source_bot_qqs": {
+    "description": "来源机器人的 QQ 号",
+    "type": "list",
+    "default": [],
+    "hint": "填写原语录机器人的 QQ 号，例如 [\"123456789\"]。为空时不自动收录，仍可引用聊天记录后发送 偷 关键词。不要填写本机器人自己的 QQ。"
+  },
+  "auto_collect": {
+    "description": "自动收录查询结果",
+    "type": "bool",
+    "default": true,
+    "hint": "监听同群的 查 关键词，并收录指定来源机器人在等待时间内返回的一份合并聊天记录。"
+  },
+  "answer_queries": {
+    "description": "响应本地语录查询",
+    "type": "bool",
+    "default": true,
+    "hint": "与原机器人同群收集期间，可以关闭此项，以免两个机器人同时回答 查 指令。添加、删除和收录仍然可用。"
+  },
+  "enabled_groups": {
+    "description": "启用的 QQ 群号",
+    "type": "list",
+    "default": [],
+    "hint": "为空时所有能收到消息的群均启用；填写群号后仅在这些群启用。私聊仍可使用手动指令。"
+  },
+  "admin_qqs": {
+    "description": "额外管理员 QQ 号",
+    "type": "list",
+    "default": [],
+    "hint": "这些账号、AstrBot 管理员，以及当前群的群主和管理员均可删除语录。"
+  },
+  "keyword_aliases": {
+    "description": "人物主词条与别名",
+    "type": "list",
+    "default": [],
+    "hint": "每项一组，例如 楚宇晗#cyh#醋与寒。第一项是主词条，后面是别名；每组最多 50 个名字，别名不能跨组重复。保存会合并同一会话下已有语录并去重，移除别名不会拆分已经合并的语录。"
+  },
+  "query_timeout": {
+    "description": "等待原机器人回复的秒数",
+    "type": "int",
+    "default": 60,
+    "hint": "范围 5～300 秒。来源回复若未引用查询消息，同群同时等待多个不同关键词时会跳过自动收录，避免串词。"
+  },
+  "notify_import": {
+    "description": "自动收录后发送结果提示",
+    "type": "bool",
+    "default": true
+  },
+  "page_size": {
+    "description": "每页查询的语录条数",
+    "type": "int",
+    "default": 40,
+    "hint": "范围 1～100；使用 查 关键词#2 翻页。"
+  },
+  "max_import_quotes": {
+    "description": "单次导入的语录上限",
+    "type": "int",
+    "default": 2000,
+    "hint": "范围 1～10000。超过上限时整次导入不写入，需分批引用或调高上限。"
+  },
+  "ignore_node_patterns": {
+    "description": "忽略聊天记录节点的正则表达式",
+    "type": "list",
+    "default": [],
+    "hint": "可按原插件格式过滤说明/统计节点，例如 ^共找到\\s*\\d+\\s*条。默认不猜测源格式，每个有文本的节点均作为一条语录。"
+  }
+}

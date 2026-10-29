@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>语录库</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-book" viewBox="0 0 24 24"><path d="M12 4C9 1 5 3 2 3v18c4 0 7-1 10 1 3-2 6-1 10-1V3c-3 0-7-2-10 1Z"/><path d="M9 8 7 12h3v4H6v-4l2-4m8 0-2 4h3v4h-4v-4l2-4"/></symbol>
+    <symbol id="icon-refresh" viewBox="0 0 24 24"><path d="M20 8a9 9 0 0 0-15-3L2 8m0-5v5h5m-3 8a9 9 0 0 0 15 3l3-3m0 5v-5h-5"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="icon-edit" viewBox="0 0 24 24"><path d="m16 3 5 5M3 21l5-1L21 7a2 2 0 0 0-4-4L4 16l-1 5Z"/></symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
+    <symbol id="icon-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="icon-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="icon-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  </svg>
+
+  <main class="workspace">
+    <header class="page-header">
+      <div class="brand"><svg class="brand-icon" aria-hidden="true"><use href="#icon-book"/></svg><div><h1>语录库</h1><p class="subtitle">把群里的好句子，留在这里。</p></div></div>
+      <div class="header-actions">
+        <button id="refresh" class="button secondary" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-refresh"/></svg>刷新</button>
+        <button id="add" class="button primary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#icon-plus"/></svg>添加语录</button>
+      </div>
+    </header>
+
+    <div id="error" class="error-banner" role="alert" hidden></div>
+
+    <section class="statistics" aria-label="语录统计">
+      <div class="stat"><span>语录总数</span><strong id="stat-quotes">—</strong></div>
+      <div class="stat"><span>关键词</span><strong id="stat-keywords">—</strong></div>
+      <div class="stat"><span>会话</span><strong id="stat-scopes">—</strong></div>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="管理功能">
+      <button class="tab active" id="tab-quotes" role="tab" aria-selected="true" aria-controls="panel-quotes" type="button">全部语录</button>
+      <button class="tab" id="tab-settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1" type="button">收录设置</button>
+    </nav>
+
+    <section id="panel-quotes" role="tabpanel" aria-labelledby="tab-quotes">
+      <form class="filter-bar" id="filters" role="search">
+        <label class="search-field"><span class="sr-only">搜索语录内容或关键词</span><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="search" type="search" placeholder="搜索语录内容或关键词…" maxlength="200" autocomplete="off"></label>
+        <label><span class="sr-only">按会话筛选</span><select id="scope-filter"><option value="">全部会话</option></select></label>
+        <label><span class="sr-only">按关键词筛选</span><select id="keyword-filter"><option value="">全部关键词</option></select></label>
+        <button class="text-button clear-filter" type="button" id="clear-filters">清除筛选</button>
+      </form>
+      <div class="table-region" id="table-region" aria-busy="true">
+        <table class="quote-table">
+          <colgroup><col class="col-content"><col class="col-keyword"><col class="col-scope"><col class="col-actions"></colgroup>
+          <thead><tr><th scope="col">语录内容</th><th scope="col">关键词</th><th scope="col">所属会话</th><th scope="col">操作</th></tr></thead>
+          <tbody id="quote-rows"></tbody>
+        </table>
+        <div id="empty" class="empty-state"><svg class="empty-icon" aria-hidden="true"><use href="#icon-book"/></svg><h2 id="empty-title">正在加载语录</h2><p id="empty-description">连接 AstrBot 语录库…</p></div>
+      </div>
+      <footer class="list-footer"><span id="result-count" role="status">正在加载…</span><div class="pagination"><button id="previous" class="button compact secondary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#icon-left"/></svg>上一页</button><span id="page-number" aria-live="polite">1 / 1</span><button id="next" class="button compact secondary" type="button" disabled>下一页<svg class="icon" aria-hidden="true"><use href="#icon-right"/></svg></button></div></footer>
+    </section>
+
+    <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+      <form id="settings-form" class="settings-form">
+        <fieldset><legend>人物别名</legend><p class="section-description">给同一个人物设置多个名字，共用一个主词条下的语录。</p>
+          <label class="field">主词条与别名（每行一组）<textarea id="setting-keyword_aliases" rows="3" placeholder="楚宇晗#cyh#醋与寒" spellcheck="false" aria-describedby="aliases-hint"></textarea></label>
+          <p id="aliases-hint" class="field-hint">用 # 分隔，第一项是主词条。保存会合并各会话内这些名字下已有的语录并去重；移除别名不会拆分已合并的语录。</p>
+        </fieldset>
+        <fieldset><legend>收录来源</legend><p class="section-description">填写原语录机器人的 QQ，在同群发送“查 关键词”后自动收录。</p>
+          <label class="field">来源机器人的 QQ 号<textarea id="setting-source_bot_qqs" rows="2" placeholder="每行一个 QQ 号，也可用逗号分隔" spellcheck="false"></textarea></label>
+          <div class="switch-row"><div><label for="setting-auto_collect">自动收录查询结果</label><p>只收录指定来源返回的合并聊天记录。</p></div><input id="setting-auto_collect" type="checkbox" role="switch"></div>
+          <div class="switch-row"><div><label for="setting-answer_queries">响应本地语录查询</label><p>收集期间可关闭，避免两个机器人同时回复。</p></div><input id="setting-answer_queries" type="checkbox" role="switch"></div>
+          <div class="switch-row"><div><label for="setting-notify_import">收录后提示结果</label><p>显示新增、重复和跳过的语录数量。</p></div><input id="setting-notify_import" type="checkbox" role="switch"></div>
+        </fieldset>
+        <fieldset><legend>范围与权限</legend><div class="field-grid two"><label class="field">启用的 QQ 群号<textarea id="setting-enabled_groups" rows="2" placeholder="留空表示所有群，每行一个群号" spellcheck="false"></textarea></label><label class="field">额外管理员 QQ 号<textarea id="setting-admin_qqs" rows="2" placeholder="每行一个 QQ 号" spellcheck="false"></textarea></label></div><p class="field-hint">QQ 中的删除指令也允许 AstrBot 管理员、当前群的群主和管理员使用。</p></fieldset>
+        <fieldset><legend>查询与导入</legend><div class="field-grid three"><label class="field">等待回复（秒）<input id="setting-query_timeout" type="number" min="5" max="300" step="1" required></label><label class="field">QQ 查询每页条数<input id="setting-page_size" type="number" min="1" max="100" step="1" required></label><label class="field">单次导入上限<input id="setting-max_import_quotes" type="number" min="1" max="10000" step="1" required></label></div><label class="field">忽略节点的正则表达式<textarea id="setting-ignore_node_patterns" rows="3" placeholder="每行一条，留空时保存所有文本节点" spellcheck="false"></textarea></label><p class="field-hint">可过滤标题或统计说明。仅保存文本，图片、语音和视频本体不保存。</p></fieldset>
+        <div id="settings-error" class="form-error" role="alert" hidden></div>
+        <div class="settings-footer"><button id="save-settings" type="submit" class="button primary" disabled>保存设置</button><span id="settings-hint" class="field-hint">保存后立即生效。</span></div>
+      </form>
+    </section>
+  </main>
+
+  <dialog id="quote-dialog" class="dialog" aria-labelledby="quote-dialog-title">
+    <form id="quote-form" class="dialog-form">
+      <header class="dialog-header"><h2 id="quote-dialog-title">添加语录</h2><button type="button" class="icon-button" data-close="quote-dialog" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button></header>
+      <label class="field">所属会话<select id="quote-scope" required></select></label>
+      <p id="scope-help" class="field-hint">语录只会出现在选中的会话中。</p>
+      <label class="field">关键词<input id="quote-keyword" maxlength="100" required placeholder="例如：嘉然" autocomplete="off"></label>
+      <label class="field">语录内容<textarea id="quote-body" rows="7" maxlength="30000" required placeholder="写下想保存的那句话，支持换行。"></textarea></label>
+      <div class="character-count"><span>保留内部空格与换行</span><span id="body-count">0 / 30000</span></div>
+      <div id="quote-error" class="form-error" role="alert" hidden></div>
+      <footer class="dialog-footer"><button type="button" class="button secondary" data-close="quote-dialog">取消</button><button id="save-quote" class="button primary" type="submit">保存语录</button></footer>
+    </form>
+  </dialog>
+
+  <dialog id="delete-dialog" class="dialog delete-dialog" aria-labelledby="delete-dialog-title">
+    <form id="delete-form" class="dialog-form">
+      <header class="dialog-header"><h2 id="delete-dialog-title">删除这条语录？</h2><button type="button" class="icon-button" data-close="delete-dialog" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-close"/></svg></button></header>
+      <p class="delete-description">将从当前会话的语录库中删除，其他会话的语录不受影响。</p><blockquote id="delete-preview"></blockquote><p id="delete-keyword" class="field-hint"></p>
+      <div id="delete-error" class="form-error" role="alert" hidden></div>
+      <footer class="dialog-footer"><button type="button" class="button secondary" data-close="delete-dialog">取消</button><button id="confirm-delete" class="button danger" type="submit">确认删除</button></footer>
+    </form>
+  </dialog>
+
+  <template id="quote-row-template"><tr><td class="quote-content" data-label="语录内容"><p class="quote-text"></p><span class="quote-meta"></span></td><td data-label="关键词"><span class="keyword-tag"></span></td><td class="scope-cell" data-label="所属会话"><span class="scope-label"></span><span class="scope-detail"></span></td><td class="actions-cell" data-label="操作"><div class="row-actions"><button class="text-button edit-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-edit"/></svg>编辑</button><span class="action-divider" aria-hidden="true"></span><button class="text-button delete-button" type="button"><svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>删除</button></div></td></tr></template>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

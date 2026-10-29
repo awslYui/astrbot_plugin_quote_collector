@@ -1,0 +1,8 @@
+{
+  "views": {
+    "manager": {
+      "title": "Quote Library",
+      "description": "Manage QQ quotes and collection settings. The management interface is in Chinese."
+    }
+  }
+}

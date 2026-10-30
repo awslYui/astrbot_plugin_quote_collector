@@ -125,6 +125,8 @@ class QuoteWebApi:
         result["settings"] = self.current_settings()
         result["can_save_settings"] = callable(getattr(self.plugin.config, "save_config", None))
         result["limits"] = {"filter_libraries": MAX_WEB_LIBRARIES, "selection": MAX_WEB_SELECTION}
+        result["runtime"] = {"version": getattr(self.plugin, "release_version", ""),
+                             "build": getattr(self.plugin, "build_id", "")}
         return result
 
     @endpoint

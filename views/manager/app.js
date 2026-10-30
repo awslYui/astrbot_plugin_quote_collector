@@ -63,6 +63,10 @@ async function loadState() {
   state.scopes = data.scopes;
   state.keywords = data.keywords;
   state.canSaveSettings = Boolean(data.can_save_settings);
+  $("runtime-build").textContent = data.runtime?.build
+    ? `已加载 ${data.runtime.version} · 构建 ${data.runtime.build}`
+    : "后端构建未确认，请重载插件或重启 AstrBot 后刷新。";
+  $("runtime-build").title = "来自当前 AstrBot 进程实际加载的插件；同为 1.0 时，可用构建标识确认更新是否生效。";
   state.limits = data.limits || state.limits;
   for (const key of ["quotes", "keywords", "scopes"]) $("stat-" + key).textContent = data.stats[key].toLocaleString("zh-CN");
   const scopes = state.scopes.map((item) => ({ value: item.scope, label: item.label + " · " + item.detail }));

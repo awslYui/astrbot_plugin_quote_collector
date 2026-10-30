@@ -16,6 +16,11 @@ from astrbot_plugin_quote_collector.store import Quote
 
 
 class PrefixCommandTests(unittest.TestCase):
+    def test_explicit_build_command_supports_optional_slash(self):
+        for value in ("语录版本", "/语录版本", "／语录版本"):
+            self.assertEqual(parse_command(value).action, "version")
+        self.assertIsNone(parse_command("有人说语录版本"))
+
     def test_prefix_accepts_adjacent_names_spaces_and_slashes(self):
         for value, keyword, page in (("来点示例人物", "示例人物", 1), ("来点 demo", "demo", 1),
                                      ("/来点示例昵称", "示例昵称", 1), ("／来点 两个 字", "两个 字", 1)):
@@ -78,6 +83,18 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.stopped)
             self.assertFalse(result.llm)
             self.assertEqual(self.bot.calls, [])
+
+    async def test_build_command_reports_loaded_instance_then_unknown_query_stays_silent(self):
+        self.plugin.build_id = "loaded-test-build"
+        handler_filter = plugin_module.QuoteEventFilter()
+        self.assertTrue(handler_filter.filter(Event(self.bot, [text("语录版本")]), {}))
+        result = await self.dispatch("语录版本")
+        self.assertEqual(result.sent, ["QQ 语录收录 1.0\n构建：loaded-test-build\n未命中查询：静默"])
+        self.assertTrue(result.stopped)
+        self.assertFalse(result.llm)
+        missed = await self.dispatch("来点未收录测试主词条")
+        self.assertEqual(missed.sent, [])
+        self.assertFalse(missed.llm)
 
     async def test_bare_names_do_not_activate_filter_reply_or_pending_collection(self):
         self.plugin.config["source_bot_qqs"] = ["888"]

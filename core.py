@@ -60,6 +60,8 @@ def parse_command(text: str) -> Command | None:
         text = text[1:].lstrip()
     if text == "语录帮助":
         return Command("help")
+    if text == "语录版本":
+        return Command("version")
     if text == "复刻":
         return Command("复刻")
     if re.match(r"^复刻\s", text):

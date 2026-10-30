@@ -29,6 +29,7 @@ HELP = """语录插件（指令前可加 /）
 引用原语录聊天记录后发送 复刻：沿用原关键词导入已有语录
 删除 关键词#完整语录：管理员精确删除
 语录帮助：查看本说明
+语录版本：查看当前实际运行的构建标识
 
 自动收录：在插件配置填入来源机器人的 QQ；在同群发送 查 关键词，插件会收录随后返回的合并聊天记录。每群的语录独立保存。
 也支持 来点关键词 发起查询和收录；查无结果时静默，单独发送人物名字或别名不会触发语录。自动收录默认不发提示。
@@ -47,6 +48,9 @@ class QuoteEventFilter(filter.CustomFilter):
 
 
 class QuoteCollectorPlugin(Star):
+    release_version = "1.0"
+    build_id = "20261030-quiet1"
+
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config if config is not None else {}
@@ -55,6 +59,7 @@ class QuoteCollectorPlugin(Star):
         self.store = QuoteStore(StarTools.get_data_dir("astrbot_plugin_quote_collector") / "quotes.db")
         self.store.configure_aliases(self.aliases)
         QuoteEventFilter.plugin = self
+        logger.info("[语录收录] 已加载 %s，构建 %s。未命中查询保持静默。", self.release_version, self.build_id)
 
     def refresh_config(self) -> None:
         """Apply persisted settings and reset query matching to the new sources."""
@@ -127,7 +132,7 @@ class QuoteCollectorPlugin(Star):
             message = self._message(event)
             return bool(group_id and contains_forward(message)
                         and self.tracker.match(self._scope(event), reply_id(message)))
-        return bool(re.match(r"^[／/]?(?:语录帮助$|复刻(?:\s|$)|来点|(?:查|添加|删除|偷)(?:\s|$))", self._text(event).strip()))
+        return bool(re.match(r"^[／/]?(?:语录(?:帮助|版本)$|复刻(?:\s|$)|来点|(?:查|添加|删除|偷)(?:\s|$))", self._text(event).strip()))
 
     @staticmethod
     def _scope(event: AstrMessageEvent) -> str:
@@ -423,6 +428,8 @@ class QuoteCollectorPlugin(Star):
                     await self._replicate(event)
                 elif command.action == "删除":
                     await self._delete(event, command)
+                elif command.action == "version":
+                    await self._say(event, f"QQ 语录收录 {self.release_version}\n构建：{self.build_id}\n未命中查询：静默")
                 else:
                     await self._say(event, HELP)
         except UserError as exc:

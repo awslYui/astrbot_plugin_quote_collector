@@ -100,6 +100,11 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(data["settings"]["auto_collect"])
         self.assertFalse(data["settings"]["notify_import"])
 
+    async def test_runtime_build_comes_from_the_loaded_plugin_instance(self):
+        self.plugin.build_id = "loaded-test-build"
+        data = (await self.call("state"))["data"]
+        self.assertEqual(data["runtime"], {"version": "1.0", "build": "loaded-test-build"})
+
     async def test_overview_main_library_cards_include_counts_scopes_and_manual_aliases(self):
         self.plugin.store.configure_aliases({"示例主库": "示例主库", "demo": "示例主库", "示例昵称": "示例主库"})
         self.plugin.store.add(self.scope, "demo", [Quote("第一条"), Quote("第二条")], "1")

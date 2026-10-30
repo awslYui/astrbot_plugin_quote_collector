@@ -43,15 +43,17 @@
     </nav>
 
     <section id="panel-quotes" role="tabpanel" aria-labelledby="tab-quotes">
+      <section class="library-browser" aria-labelledby="library-browser-title">
+        <div class="library-browser-header"><div><h2 id="library-browser-title">主库总览 <span id="library-total">—</span></h2><p>点卡片查看单库，勾选可多选。数量为所有会话合计。</p></div><label class="library-search"><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="library-search" type="search" aria-label="搜索主库或别名" placeholder="搜索主库或别名…" maxlength="100" autocomplete="off"></label></div>
+        <div id="library-options" class="library-grid" role="group" aria-label="主库目录"></div><p id="library-empty" class="library-empty" hidden>没有匹配的主库，试试其他库名或别名。</p>
+        <div class="library-browser-footer"><button id="clear-libraries" class="text-button" type="button">查看全部主库</button><span id="library-filter-label" class="field-hint">未限定主库</span><button id="library-show-more" class="text-button" type="button" hidden>展开更多主库</button></div>
+      </section>
       <form class="filter-bar" id="filters" role="search">
         <label class="search-field"><span class="sr-only">搜索语录内容或库名</span><svg class="icon" aria-hidden="true"><use href="#icon-search"/></svg><input id="search" type="search" placeholder="搜索语录内容或库名…" maxlength="200" autocomplete="off"></label>
         <label><span class="sr-only">按会话筛选</span><select id="scope-filter"><option value="">全部会话</option></select></label>
-        <details id="library-filter" class="library-filter">
-          <summary id="library-summary"><span class="sr-only">按库名筛选：</span><span id="library-filter-label">全部语录库</span><span class="filter-chevron" aria-hidden="true">⌄</span></summary>
-          <div class="library-panel"><label class="library-search"><span class="sr-only">搜索库名</span><input id="library-search" type="search" placeholder="搜索库名…" maxlength="100" autocomplete="off"></label><div class="library-panel-header"><span>语录库（可多选）</span><button id="clear-libraries" class="text-button" type="button">重置</button></div><div id="library-options" class="library-options" role="group" aria-label="库名列表"></div><p id="library-empty" class="field-hint" hidden>没有匹配的语录库。</p></div>
-        </details>
         <button class="text-button clear-filter" type="button" id="clear-filters">清除筛选</button>
       </form>
+      <div class="library-context"><div><p class="context-label">当前浏览</p><h2 id="active-library-title">全部主库的语录</h2><p id="active-library-detail">正在加载语录…</p></div><span id="active-library-count" class="context-count">—</span></div>
       <div class="batch-bar"><div class="selection-controls"><label class="select-page"><input id="select-page" type="checkbox" disabled>全选本页</label><span id="selection-count" role="status" aria-live="polite">已选 0 条</span><button id="clear-selection" type="button" class="text-button" disabled>取消选择</button></div><button id="batch-delete" type="button" class="button compact secondary batch-delete" disabled><svg class="icon" aria-hidden="true"><use href="#icon-trash"/></svg>批量删除</button></div>
       <div class="table-region" id="table-region" aria-busy="true">
         <table class="quote-table">
@@ -74,7 +76,7 @@
           <label class="field">来源机器人的 QQ 号<textarea id="setting-source_bot_qqs" rows="2" placeholder="每行一个 QQ 号，也可用逗号分隔" spellcheck="false"></textarea></label>
           <div class="switch-row"><div><label for="setting-auto_collect">自动收录查询结果</label><p>只收录指定来源返回的合并聊天记录。</p></div><input id="setting-auto_collect" type="checkbox" role="switch"></div>
           <div class="switch-row"><div><label for="setting-answer_queries">响应本地语录查询</label><p>收集期间可关闭，避免两个机器人同时回复。</p></div><input id="setting-answer_queries" type="checkbox" role="switch"></div>
-          <div class="switch-row"><div><label for="setting-notify_import">收录后提示结果</label><p>显示新增、重复和跳过的语录数量。</p></div><input id="setting-notify_import" type="checkbox" role="switch"></div>
+          <div class="switch-row"><div><label for="setting-notify_import">自动收录有新增时提示</label><p>默认关闭。有新增时才提示；重复或失败保持静默。</p></div><input id="setting-notify_import" type="checkbox" role="switch"></div>
         </fieldset>
         <fieldset><legend>范围与权限</legend><div class="field-grid two"><label class="field">启用的 QQ 群号<textarea id="setting-enabled_groups" rows="2" placeholder="留空表示所有群，每行一个群号" spellcheck="false"></textarea></label><label class="field">额外管理员 QQ 号<textarea id="setting-admin_qqs" rows="2" placeholder="每行一个 QQ 号" spellcheck="false"></textarea></label></div><p class="field-hint">QQ 中的删除指令也允许 AstrBot 管理员、当前群的群主和管理员使用。</p></fieldset>
         <fieldset><legend>查询与导入</legend><div class="field-grid two"><label class="field">等待回复（秒）<input id="setting-query_timeout" type="number" min="5" max="300" step="1" required></label><label class="field">单次导入上限<input id="setting-max_import_quotes" type="number" min="1" max="10000" step="1" required></label></div><label class="field">忽略节点的正则表达式<textarea id="setting-ignore_node_patterns" rows="3" placeholder="每行一条，留空时保存所有文本节点" spellcheck="false"></textarea></label><p class="field-hint">可过滤标题或统计说明。仅保存文本，图片、语音和视频本体不保存。</p></fieldset>

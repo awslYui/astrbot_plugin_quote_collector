@@ -112,7 +112,9 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch("添加 未收录人物甲#只是名字包含相同文字")
         result = await self.dispatch("来点未收录人物")
         self.assertEqual(self.bot.calls, [])
-        self.assertIn("还没有【未收录人物】", result.sent[-1])
+        self.assertEqual(result.sent, [])
+        self.assertTrue(result.stopped)
+        self.assertFalse(result.llm)
 
     async def test_exact_main_entry_has_priority_over_another_original_trigger(self):
         event = await self.dispatch("添加 示例人物#该人物的语录")
@@ -149,7 +151,7 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.store.add_many(self.plugin._scope(event), {"原人物ID": [Quote("当前群的来源语录")]}, "1",
                                    source_triggers={"原人物ID": {"来点原别名"}})
         result = await self.dispatch("来点原别名", group="200")
-        self.assertIn("还没有", result.sent[-1])
+        self.assertEqual(result.sent, [])
         self.assertEqual(self.bot.calls, [])
 
     async def test_random_reply_samples_whole_library_and_ignores_old_page_size(self):
@@ -180,7 +182,7 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.calls, [])
 
     async def test_prefixed_query_starts_collection_under_the_main_entry(self):
-        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False)
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
         self.plugin.refresh_config()
         query = await self.dispatch("来点demo", message_id="1")
         self.assertEqual(self.plugin.tracker.match(self.plugin._scope(query)).keyword, "示例人物")
@@ -188,13 +190,12 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.dispatch([forward("r")], sender="888")
         self.assertIn("【示例人物】收录完成：新增 1 条", result.sent[-1])
 
-    async def test_obsolete_prefixed_page_shows_catalog_usage_without_starting_collection(self):
+    async def test_obsolete_prefixed_page_is_silent_without_starting_collection(self):
         self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False)
         self.plugin.refresh_config()
         event = await self.dispatch("来点demo#2")
         self.assertIsNone(self.plugin.tracker.match(self.plugin._scope(event)))
-        self.assertIn("每次随机返回一条", event.sent[-1])
-        self.assertIn("查 关键词#2", event.sent[-1])
+        self.assertEqual(event.sent, [])
         self.assertEqual(self.bot.calls, [])
 
     async def test_random_reply_preserves_multiline_original_without_catalog_labels(self):
@@ -203,6 +204,88 @@ class PrefixWorkflowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.dispatch("来点demo")
         self.assertEqual(result.sent, [body])
         self.assertEqual(self.bot.calls, [])
+
+    async def test_missing_queries_are_silent_in_groups_private_chats_and_aliases(self):
+        for group in ("100", "200", ""):
+            for command in ("来点未收录人物", "/来点demo", "查 未收录人物", "查 示例昵称"):
+                with self.subTest(group=group, command=command):
+                    result = await self.dispatch(command, group=group)
+                    self.assertEqual(result.sent, [])
+                    self.assertTrue(result.stopped)
+                    self.assertFalse(result.llm)
+        self.assertEqual(self.bot.calls, [])
+
+    async def test_invalid_natural_requests_do_not_emit_usage_or_fall_back_to_llm(self):
+        for command in ("来点", "/ 来点 ", "／来点demo#2", "来点#x", "来点" + "字" * 101):
+            with self.subTest(command=command):
+                result = await self.dispatch(command)
+                self.assertEqual(result.sent, [])
+                self.assertTrue(result.stopped)
+                self.assertFalse(result.llm)
+
+    async def test_natural_query_failures_are_logged_without_chat_error_messages(self):
+        with patch.object(self.plugin.store, "random_quote", side_effect=RuntimeError("simulated failure")):
+            with self.assertLogs("quote-tests", level="ERROR"):
+                result = await self.dispatch("来点demo")
+        self.assertEqual(result.sent, [])
+        self.assertTrue(result.stopped)
+        self.assertFalse(result.llm)
+
+    async def test_auto_collection_is_silent_by_default_but_still_saves_quotes(self):
+        self.plugin.config.update(source_bot_qqs=["888"])
+        self.plugin.refresh_config()
+        query = await self.dispatch("来点demo", message_id="1")
+        self.bot.forwards["r"] = {"messages": [{"message": [text("原文")]}]}
+        result = await self.dispatch([forward("r")], sender="888")
+        self.assertEqual(query.sent, [])
+        self.assertEqual(result.sent, [])
+        self.assertFalse(result.llm)
+        self.assertEqual(self.plugin.store.search(self.plugin._scope(query), "示例人物", 1, 40)[1], 1)
+
+    async def test_enabled_auto_notifications_skip_duplicate_only_imports(self):
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
+        self.plugin.refresh_config()
+        self.bot.forwards["r"] = {"messages": [{"message": [text("原文")]}]}
+        await self.dispatch("查 demo", message_id="1")
+        first = await self.dispatch([forward("r")], sender="888", message_id="50")
+        self.assertEqual(len(first.sent), 1)
+        self.assertIn("新增 1 条", first.sent[0])
+        await self.dispatch("查 demo", message_id="2")
+        repeated = await self.dispatch([forward("r")], sender="888", message_id="51")
+        self.assertEqual(repeated.sent, [])
+        self.assertFalse(repeated.llm)
+
+    async def test_auto_empty_or_unreadable_records_remain_silent_even_with_notifications(self):
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
+        self.plugin.refresh_config()
+        await self.dispatch("查 demo", message_id="1")
+        self.bot.forwards["r"] = {"messages": [{"message": []}]}
+        empty = await self.dispatch([forward("r")], sender="888")
+        self.assertEqual(empty.sent, [])
+        await self.dispatch("查 demo", message_id="2")
+        with self.assertLogs("quote-tests", level="WARNING"):
+            unreadable = await self.dispatch([forward("missing")], sender="888")
+        self.assertEqual(unreadable.sent, [])
+        self.assertFalse(unreadable.llm)
+        self.assertEqual(self.plugin.store.web_list()["total"], 0)
+
+    async def test_auto_catalog_errors_are_silent_and_write_nothing(self):
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
+        self.plugin.refresh_config()
+        await self.dispatch("查 demo", message_id="1")
+        self.bot.forwards["r"] = {"messages": [{"message": [text("主库：示例人物\n全部文本：2 条\n1. ‘只有一条’")]}]}
+        result = await self.dispatch([forward("r")], sender="888")
+        self.assertEqual(result.sent, [])
+        self.assertFalse(result.llm)
+        self.assertEqual(self.plugin.store.web_list()["total"], 0)
+
+    async def test_manual_writes_and_explicit_help_keep_their_acknowledgements(self):
+        for command in ("添加 demo#原文", "添加 demo#原文", "语录帮助"):
+            result = await self.dispatch(command)
+            self.assertEqual(len(result.sent), 1)
+        deleted = await self.dispatch("删除 demo#原文", role="admin")
+        self.assertEqual(len(deleted.sent), 1)
+        self.assertIn("已删除", deleted.sent[0])
 
     async def test_replica_can_use_original_reply_to_a_prefixed_request(self):
         self.bot.messages[101] = {"group_id": 100, "message": [text("来点demo")]}

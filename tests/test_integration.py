@@ -163,7 +163,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.dispatch(plugin, [forward("r")], sender="888", group="200")
         self.assertEqual(plugin.store.search(plugin._scope(query), "a", 1, 40)[1], 0)
         imported = await self.dispatch(plugin, [forward("r")], sender="888")
-        self.assertIn("新增 1", imported.sent[-1])
+        self.assertEqual(imported.sent, [])
         self.assertEqual(plugin.store.search(plugin._scope(query), "a", 1, 40)[1], 1)
 
     async def test_ambiguous_queries_are_not_assigned_to_wrong_keyword(self):
@@ -210,7 +210,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         plugin = self.plugin(source_bot_qqs=["888"], auto_collect=False)
         query = await self.dispatch(plugin, "查 a")
         await self.dispatch(plugin, [forward("r")], sender="888")
-        self.assertIn("还没有", query.sent[-1])
+        self.assertEqual(query.sent, [])
         self.assertFalse(self.bot.calls)
 
     async def test_forward_send_falls_back_to_literal_text(self):

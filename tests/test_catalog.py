@@ -211,7 +211,7 @@ class CatalogWorkflowTests(unittest.IsolatedAsyncioTestCase):
             await self.quote_command("复刻")
         overview = self.plugin.store.web_overview()
         self.assertEqual(overview["stats"], {"quotes": 2, "keywords": 1, "scopes": 1})
-        self.assertEqual(overview["keywords"], [{"keyword": "123456789", "count": 2}])
+        self.assertEqual(overview["keywords"], [{"keyword": "123456789", "count": 2, "scope_count": 1, "aliases": []}])
         for trigger in ("口令甲", "口令乙"):
             rows, count = self.plugin.store.search(self.plugin.store.web_list()["items"][0]["scope"], trigger, 1, 40)
             self.assertEqual((count, {row.keyword for row in rows}), (2, {"123456789"}))
@@ -231,6 +231,7 @@ class CatalogWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_auto_collection_uses_main_keyword_and_deduplicates_with_replication(self):
         self.plugin.config["source_bot_qqs"] = ["888"]
+        self.plugin.config["notify_import"] = True
         self.plugin.refresh_config()
         await self.dispatch("查 占位符", message_id="1")
         source = await self.dispatch([forward("r")], sender="888", message_id="50")

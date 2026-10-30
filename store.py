@@ -249,8 +249,13 @@ class QuoteStore:
             scopes = [dict(row) for row in conn.execute("""SELECT s.scope, COUNT(q.id) AS count
                 FROM quote_sessions s LEFT JOIN quotes q ON q.scope=s.scope
                 GROUP BY s.scope ORDER BY count DESC, s.scope""")]
-            keywords = [dict(row) for row in conn.execute("""SELECT keyword, COUNT(*) AS count
+            keywords = [dict(row) for row in conn.execute("""SELECT keyword, COUNT(*) AS count, COUNT(DISTINCT scope) AS scope_count
                 FROM quotes GROUP BY keyword ORDER BY keyword""")]
+            aliases = {}
+            for row in conn.execute("SELECT keyword, alias FROM quote_aliases WHERE alias<>keyword ORDER BY alias"):
+                aliases.setdefault(row["keyword"], []).append(row["alias"])
+            for keyword in keywords:
+                keyword["aliases"] = aliases.get(keyword["keyword"], [])
         counts["scopes"] = len(scopes)
         return {"stats": counts, "scopes": scopes, "keywords": keywords}
 

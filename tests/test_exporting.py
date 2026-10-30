@@ -246,3 +246,7 @@ class ExportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("本页展示 2 条", second.sent[-1])
             invalid = await self.dispatch("查 示例人物#4")
             self.assertIn("共 3 页", invalid.sent[-1])
+            final = await self.dispatch("查 示例人物#3")
+            self.assertEqual(final.sent, [])
+            page = parse_catalog([Quote(node["data"]["content"][0]["data"]["text"]) for node in self.query_nodes()])
+            self.assertEqual([quote.body for quote in page.groups["示例人物"]], ["原文4"])

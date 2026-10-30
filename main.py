@@ -31,7 +31,7 @@ HELP = """语录插件（指令前可加 /）
 语录帮助：查看本说明
 
 自动收录：在插件配置填入来源机器人的 QQ；在同群发送 查 关键词，插件会收录随后返回的合并聊天记录。每群的语录独立保存。
-也支持 来点关键词 发起查询和收录；单独发送人物名字或别名不会触发语录。
+也支持 来点关键词 发起查询和收录；查无结果时静默，单独发送人物名字或别名不会触发语录。自动收录默认不发提示。
 原记录含“主库”时，以该人物 ID 作为主词条；“触发词”作为查询别名。
 可在 WebUI 的“人物别名”中配置 主词条#别名#别名，查询、添加和删除共用同一语录库。
 本插件收录文本；表情转为 [表情:ID]、@ 转为文字。图片、语音和视频本体不保存。"""
@@ -302,7 +302,7 @@ class QuoteCollectorPlugin(Star):
         await self._say(event, f"已删除【{command.keyword}】的这条语录。" if deleted else
                         "没有找到这条语录。请确认关键词和 # 后的完整内容（包括换行）一致。")
 
-    async def _query(self, event: AstrMessageEvent, command: Command, waiting: bool) -> None:
+    async def _query(self, event: AstrMessageEvent, command: Command) -> None:
         if not self.config.get("answer_queries", True):
             return
         natural = command.action == "来点"
@@ -315,8 +315,6 @@ class QuoteCollectorPlugin(Star):
             catalog = await asyncio.to_thread(self.store.catalog_page, self._scope(event), command.keyword, command.page)
             total, pages, shown = catalog.total, catalog.pages, catalog.shown
         if not total:
-            if not waiting:
-                await self._say(event, f"还没有【{command.keyword}】的语录。可用 添加 {command.keyword}#语录，或引用聊天记录后发送 偷 {command.keyword}。")
             return
         if natural:
             await self._say(event, quote.body)
@@ -340,8 +338,8 @@ class QuoteCollectorPlugin(Star):
             text = "\n\n".join(body for _, body in contents)
             for start in range(0, len(text), 3500):
                 await self._say(event, text[start:start + 3500])
-        if pages > 1:
-            following = f"下一页：{query_text}#{command.page + 1}" if command.page < pages else "已到最后一页。"
+        if command.page < pages:
+            following = f"下一页：{query_text}#{command.page + 1}"
             detail = f"本页展示 {shown} 条。"
             await self._say(event, f"【{command.keyword}】共 {total} 条，第 {command.page}/{pages} 页。{detail}{following}")
 
@@ -353,6 +351,7 @@ class QuoteCollectorPlugin(Star):
         if query is None:
             return
         event.stop_event()
+        event.should_call_llm(False)
         success = False
         try:
             provenance = source_keys(message, str(event.message_obj.message_id))
@@ -365,8 +364,8 @@ class QuoteCollectorPlugin(Star):
             report = await self._reader(event).read(message, source_id=str(event.message_obj.message_id))
             if not report.quotes:
                 success = not report.errors
-                if self.config.get("notify_import", True):
-                    await self._say(event, "未能收录：" + ("聊天记录读取失败，请稍后引用重试。" if report.errors else "这份聊天记录中没有可收录的文本。"))
+                if report.errors:
+                    logger.warning("[语录收录] 自动收录未获得可读语录，已保留待重试关联。")
                 return
             catalog = parse_catalog(report.quotes, limit=self.import_limit)
             label = query.keyword
@@ -383,7 +382,7 @@ class QuoteCollectorPlugin(Star):
                 added, duplicates = await asyncio.to_thread(self.store.add, self._scope(event), query.keyword,
                                                            report.quotes, str(event.get_sender_id()), provenance)
             success = True
-            if self.config.get("notify_import", True):
+            if added and self.config.get("notify_import", False):
                 await self._say(event, self._summary(label, report, added, duplicates))
         finally:
             self.tracker.finish(query, success)
@@ -399,22 +398,24 @@ class QuoteCollectorPlugin(Star):
         group_id = str(event.get_group_id() or "")
         if group_id and self.groups and group_id not in self.groups:
             return
+        quiet_reply = sender_id in self.sources
         try:
             if sender_id in self.sources:
                 await self._collect(event)
                 return
             # Read only this message's text, never text nested inside Reply.
-            command = parse_command(self._text(event))
+            text = self._text(event)
+            quiet_reply = bool(re.match(r"^(?:[／/]\s*)?来点", text.strip()))
+            command = parse_command(text)
             if command is None:
                 return
             command = replace(command, keyword=self.canonical_keyword(command.keyword))
             event.stop_event()
             event.should_call_llm(False)
             if command.action in {"查", "来点"}:
-                waiting = bool(group_id and self.sources and self.config.get("auto_collect", True))
                 if group_id and self.sources and command.page == 1:
                     self.tracker.add(self._scope(event), str(event.message_obj.message_id), command.keyword)
-                await self._query(event, command, waiting and command.page == 1)
+                await self._query(event, command)
             else:
                 if command.action in {"添加", "偷"}:
                     await self._add(event, command)
@@ -427,12 +428,16 @@ class QuoteCollectorPlugin(Star):
         except UserError as exc:
             event.stop_event()
             event.should_call_llm(False)
-            await self._say(event, str(exc))
+            if quiet_reply:
+                logger.debug("[语录收录] 已静默跳过无法处理的查询或自动收录：%s", exc)
+            else:
+                await self._say(event, str(exc))
         except Exception:
             logger.exception("[语录收录] 处理消息失败。")
             event.stop_event()
             event.should_call_llm(False)
-            await self._say(event, "语录处理失败，已有语录会保留。请检查 AstrBot 日志后重试。")
+            if not quiet_reply:
+                await self._say(event, "语录处理失败，已有语录会保留。请检查 AstrBot 日志后重试。")
 
     async def terminate(self) -> None:
         if self.web_ui is not None:

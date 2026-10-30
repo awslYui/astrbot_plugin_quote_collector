@@ -42,9 +42,10 @@
     "hint": "范围 5～300 秒。来源回复若未引用查询消息，同群同时等待多个不同关键词时会跳过自动收录，避免串词。"
   },
   "notify_import": {
-    "description": "自动收录后发送结果提示",
+    "description": "自动收录有新增时提示",
     "type": "bool",
-    "default": true
+    "default": false,
+    "hint": "默认静默。开启后仅在自动收录有新增语录时发送一条提示；重复、无内容及读取失败不在聊天中提示。手动添加、删除和复刻仍会回复操作结果。"
   },
   "max_import_quotes": {
     "description": "单次导入的语录上限",

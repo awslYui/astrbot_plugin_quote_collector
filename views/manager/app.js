@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const bridge = window.AstrBotPluginView || window.AstrBotPluginPage;
 const state = { scopes: [], keywords: [], items: [], page: 1, pageSize: 6, total: 0,
   scope: "", libraries: [], query: "", ready: false, canSaveSettings: false,
+  librariesExpanded: false,
   selection: new Map(), loading: false, listReady: false, limits: {filter_libraries: 100, selection: 500} };
 const listFields = ["source_bot_qqs", "enabled_groups", "admin_qqs", "ignore_node_patterns", "keyword_aliases"];
 const boolFields = ["auto_collect", "answer_queries", "notify_import"];
@@ -76,15 +77,49 @@ async function loadState() {
 function renderLibraries() {
   const search = $("library-search").value.trim().toLocaleLowerCase();
   const options = document.createDocumentFragment();
-  let count = 0;
-  for (const library of state.keywords) {
-    if (!library.keyword.toLocaleLowerCase().includes(search)) continue;
-    const label = document.createElement("label");
-    label.className = "library-option";
+  const matches = state.keywords.filter(library => [library.keyword, ...(library.aliases || [])]
+    .some(name => name.toLocaleLowerCase().includes(search)));
+  if (!search) matches.sort((a, b) => Number(state.libraries.includes(b.keyword)) - Number(state.libraries.includes(a.keyword)));
+  const visible = search || state.librariesExpanded ? matches : matches.slice(0, 4);
+  for (const library of visible) {
+    const card = document.createElement("article");
+    card.className = `library-card tone-${libraryTone(library.keyword)}`;
+    card.dataset.keyword = library.keyword;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "library-open";
+    open.setAttribute("aria-label", `查看主库 ${library.keyword}`);
+    open.addEventListener("click", () => {
+      state.libraries = state.libraries.length === 1 && state.libraries[0] === library.keyword ? [] : [library.keyword];
+      updateLibraryLabel();
+      if (state.ready) applyFilters();
+    });
+    const avatar = document.createElement("span");
+    avatar.className = "library-avatar";
+    avatar.setAttribute("aria-hidden", "true");
+    avatar.textContent = [...library.keyword][0];
+    const name = document.createElement("strong");
+    name.className = "library-name";
+    name.textContent = library.keyword;
+    name.title = library.keyword;
+    const counts = document.createElement("span");
+    counts.className = "library-counts";
+    const number = document.createElement("strong");
+    number.textContent = library.count.toLocaleString("zh-CN");
+    const unit = document.createElement("span");
+    unit.textContent = "条语录";
+    const scopes = document.createElement("small");
+    scopes.textContent = typeof library.scope_count === "number" ? `${library.scope_count} 个会话` : "所有会话合计";
+    counts.append(number, unit, scopes);
+    const aliases = document.createElement("span");
+    aliases.className = "library-aliases";
+    aliases.textContent = library.aliases?.length ? `别名：${library.aliases.join("、")}` : "暂无别名";
+    aliases.title = aliases.textContent;
+    open.append(avatar, name, counts, aliases);
     const input = document.createElement("input");
     input.type = "checkbox";
-    input.setAttribute("aria-label", library.keyword);
-    input.checked = state.libraries.includes(library.keyword);
+    input.className = "library-check";
+    input.setAttribute("aria-label", `筛选主库 ${library.keyword}`);
     input.addEventListener("change", () => {
       const selected = new Set(state.libraries);
       if (input.checked) selected.add(library.keyword); else selected.delete(library.keyword);
@@ -96,21 +131,47 @@ function renderLibraries() {
       updateLibraryLabel();
       if (state.ready) applyFilters();
     });
-    const name = document.createElement("span");
-    name.textContent = library.keyword;
-    label.append(input, name);
-    options.append(label);
-    count++;
+    card.append(open, input);
+    options.append(card);
   }
   $("library-options").replaceChildren(options);
-  $("library-empty").hidden = count > 0;
+  $("library-empty").hidden = matches.length > 0;
+  $("library-empty").textContent = state.keywords.length ? "没有匹配的主库，试试其他库名或别名。"
+    : "还没有语录主库。先在 QQ 中添加语录，或引用原记录回复“复刻”。";
+  $("library-total").textContent = state.keywords.length.toLocaleString("zh-CN");
+  $("library-show-more").hidden = Boolean(search) || matches.length <= 4;
+  $("library-show-more").textContent = state.librariesExpanded ? "收起主库" : `展开其余 ${matches.length - visible.length} 个主库`;
   updateLibraryLabel();
 }
 
+function libraryTone(name) {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)) % 5;
+  return hash;
+}
+
 function updateLibraryLabel() {
-  $("library-filter-label").textContent = state.libraries.length === 1 ? state.libraries[0]
-    : state.libraries.length ? `已选 ${state.libraries.length} 个库` : "全部语录库";
-  $("library-summary").title = state.libraries.length ? state.libraries.join("、") : "按库名筛选，可多选";
+  $("library-filter-label").textContent = state.libraries.length ? `已选择 ${state.libraries.length} 个主库` : "未限定主库";
+  for (const card of $("library-options").children) {
+    const selected = state.libraries.includes(card.dataset.keyword);
+    card.classList.toggle("is-active", selected);
+    card.querySelector("input").checked = selected;
+    card.querySelector("button").setAttribute("aria-pressed", String(selected));
+  }
+  updateLibraryContext();
+}
+
+function updateLibraryContext() {
+  const single = state.libraries.length === 1;
+  $("active-library-title").textContent = single ? state.libraries[0]
+    : state.libraries.length ? `已选择 ${state.libraries.length} 个主库` : "全部主库的语录";
+  const library = single ? state.keywords.find(item => item.keyword === state.libraries[0]) : null;
+  const names = state.libraries.slice(0, 3).join("、") + (state.libraries.length > 3 ? "等" : "");
+  const detail = single ? (library?.aliases?.length ? `别名：${library.aliases.join("、")}` : "按主词条归档的语录")
+    : state.libraries.length ? names : "点击上方主库卡片，集中浏览对应语录。";
+  $("active-library-detail").textContent = detail;
+  $("active-library-detail").title = detail;
+  $("active-library-count").textContent = state.loading || !state.listReady ? "加载中…" : `${state.total.toLocaleString("zh-CN")} 条匹配`;
 }
 
 function updateSelection() {
@@ -129,6 +190,7 @@ function updateSelection() {
     input.closest("tr").classList.toggle("is-selected", input.checked);
   }
   for (const button of $("quote-rows").querySelectorAll("button")) button.disabled = unavailable;
+  updateLibraryContext();
 }
 
 function clearSelection() {
@@ -159,6 +221,7 @@ function renderRows() {
     row.querySelector(".quote-text").textContent = quote.body;
     row.querySelector(".quote-meta").textContent = `#${quote.id} · ${displayDate(quote.created_at)}`;
     row.querySelector(".keyword-tag").textContent = quote.keyword;
+    row.querySelector(".keyword-tag").classList.add("library-tone", `tone-${libraryTone(quote.keyword)}`);
     row.querySelector(".scope-label").textContent = quote.label;
     row.querySelector(".scope-detail").textContent = quote.detail;
     const edit = row.querySelector(".edit-button");
@@ -425,14 +488,9 @@ $("clear-libraries").addEventListener("click", () => {
   renderLibraries();
   if (state.ready) applyFilters();
 });
-document.addEventListener("click", event => {
-  if (!$("library-filter").contains(event.target)) $("library-filter").open = false;
-});
-$("library-filter").addEventListener("keydown", event => {
-  if (event.key === "Escape") {
-    $("library-filter").open = false;
-    $("library-summary").focus();
-  }
+$("library-show-more").addEventListener("click", () => {
+  state.librariesExpanded = !state.librariesExpanded;
+  renderLibraries();
 });
 $("clear-filters").addEventListener("click", () => {
   $("search").value = $("scope-filter").value = $("library-search").value = "";

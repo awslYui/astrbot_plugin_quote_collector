@@ -203,7 +203,7 @@ class AliasWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["source_triggers"], ["来点demo", "来点示例昵称"])
 
     async def test_automatic_replies_to_two_names_are_one_unambiguous_pending_entry(self):
-        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False)
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
         self.plugin.refresh_config()
         await self.dispatch("查 demo", message_id="1")
         event = await self.dispatch("查 示例昵称", message_id="2")
@@ -214,7 +214,7 @@ class AliasWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.plugin.store.web_list()["items"][0]["keyword"], "示例人物")
 
     async def test_automatic_catalog_collection_uses_the_configured_main_entry(self):
-        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False)
+        self.plugin.config.update(source_bot_qqs=["888"], answer_queries=False, notify_import=True)
         self.plugin.refresh_config()
         await self.dispatch("查 demo", message_id="1")
         source = "主库：示例昵称\n触发词：原查询口令\n全部文本：1 条\n1. ‘原来的语录’"

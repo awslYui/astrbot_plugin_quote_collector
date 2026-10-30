@@ -98,6 +98,17 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["scopes"][0]["label"], "QQ群 100")
         self.assertTrue(data["can_save_settings"])
         self.assertTrue(data["settings"]["auto_collect"])
+        self.assertFalse(data["settings"]["notify_import"])
+
+    async def test_overview_main_library_cards_include_counts_scopes_and_manual_aliases(self):
+        self.plugin.store.configure_aliases({"示例主库": "示例主库", "demo": "示例主库", "示例昵称": "示例主库"})
+        self.plugin.store.add(self.scope, "demo", [Quote("第一条"), Quote("第二条")], "1")
+        self.plugin.store.add(self.other_scope, "示例主库", [Quote("另一会话")], "1")
+        result = await self.call("state")
+        library = next(item for item in result["data"]["keywords"] if item["keyword"] == "示例主库")
+        self.assertEqual((library["count"], library["scope_count"]), (3, 2))
+        self.assertEqual(set(library["aliases"]), {"demo", "示例昵称"})
+        self.assertFalse(any(item["keyword"] in {"demo", "示例昵称"} for item in result["data"]["keywords"]))
 
     async def test_list_filter_and_pagination(self):
         self.plugin.store.add(self.other_scope, "其他", [Quote("别的群")], "1")
